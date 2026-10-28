@@ -1,0 +1,39 @@
+/* Values taken directly from core's own Dashboard.js/PreferencesTab.js
+   conventions (see the Module UI Guide) - not invented. This renders
+   inside a registerDashboardTab tab, whose content wrapper already
+   applies padding: 20px - no outer padding/background of this module's
+   own on top of that (the Module UI Guide's own "What not to bring in"
+   section warns this doubles up visually), unlike the old
+   registerMenuPage page this used to be, which owned its outer padding
+   itself. */
+
+.tabBar {
+  display: flex;
+  border-bottom: 1px solid #ddd;
+}
+
+.tabButton {
+  padding: 15px 25px;
+  cursor: pointer;
+  border: none;
+  background-color: transparent;
+  border-bottom: none;
+  font-weight: normal;
+  font-size: 13px;
+  color: #333;
+}
+
+.tabButtonActive {
+  background-color: #f8f9fa;
+  border-bottom: 2px solid #007bff;
+  font-weight: bold;
+}
+
+.content {
+  padding-top: 20px;
+}
+
+.loading {
+  text-align: center;
+  padding: 20px;
+}

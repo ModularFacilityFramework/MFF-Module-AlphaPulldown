@@ -1,0 +1,16 @@
+{
+  "extends": ["react-app"],
+  "rules": {
+    "no-restricted-imports": [
+      "error",
+      {
+        "patterns": [
+          {
+            "group": ["**/mff-core/**", "**/MFF-core/**"],
+            "message": "This module repo must never import from an mff-core checkout directly. Everything this module needs from core comes through coreApi (see docs/MFF-Core_module-core-api.md) - if something's missing from it, that's a coreApi gap to raise, not a reason to reach across repos."
+          }
+        ]
+      }
+    ]
+  }
+}

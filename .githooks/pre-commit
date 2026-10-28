@@ -1,0 +1,23 @@
+#!/bin/sh
+set -e
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+MANIFEST="$REPO_ROOT/module.manifest.json"
+
+if [ ! -f "$MANIFEST" ]; then
+  exit 0
+fi
+
+CURRENT_COUNT=$(git rev-list --count HEAD 2>/dev/null || echo 0)
+NEXT_COUNT=$((CURRENT_COUNT + 1))
+
+node -e "
+const fs = require('fs');
+const path = '$MANIFEST';
+const manifest = JSON.parse(fs.readFileSync(path, 'utf8'));
+const parts = (manifest.version || '0.1.0').split('.');
+manifest.version = \`\${parts[0]}.\${parts[1]}.$NEXT_COUNT\`;
+fs.writeFileSync(path, JSON.stringify(manifest, null, 2) + '\n');
+"
+
+git add "$MANIFEST"

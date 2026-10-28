@@ -1,0 +1,12 @@
+node_modules/
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+coverage/
+*.tmp
+*.temp

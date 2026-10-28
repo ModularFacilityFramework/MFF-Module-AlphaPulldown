@@ -1,0 +1,44 @@
+.wrap {
+  position: relative;
+}
+
+/* Fixed ceiling, own scrollbar: a long log scrolls inside this box instead of
+   growing the page. max-height (not height) so a short log doesn't leave a
+   big empty box. */
+.box {
+  box-sizing: border-box;
+  max-height: 480px;
+  overflow-y: auto;
+  background: #f8f9fa;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 12px;
+}
+
+.pre {
+  margin: 0;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.notice {
+  font-size: 12px;
+  color: #856404;
+  margin: 0 0 8px;
+}
+
+/* Only shown after scrolling away from the newest line. */
+.latestButton {
+  position: absolute;
+  right: 22px;
+  bottom: 12px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: white;
+  background-color: #007bff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+}

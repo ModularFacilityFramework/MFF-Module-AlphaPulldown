@@ -1,0 +1,30 @@
+{
+  "name": "mff-module-abcfold",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MFF-core feature module for running ABCFold jobs.",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "lint": "eslint backend frontend --ext .js"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "mariadb": "^3.4.2"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.0",
+    "eslint-config-react-app": "^7.0.1"
+  },
+  "peerDependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-router-dom": "^7.18.2"
+  },
+  "peerDependenciesMeta": {
+    "react": { "optional": true },
+    "react-dom": { "optional": true },
+    "react-router-dom": { "optional": true }
+  }
+}

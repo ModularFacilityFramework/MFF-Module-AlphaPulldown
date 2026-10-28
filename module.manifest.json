@@ -1,0 +1,12 @@
+{
+  "id": "abcfold",
+  "label": "ABCFold",
+  "version": "0.1.72",
+  "tablePrefix": "abcfold_",
+  "mountPath": "/abcfold",
+  "backendEntry": "backend/index.js",
+  "frontendEntry": "frontend/index.js",
+  "requires": [
+    "slurm"
+  ]
+}
