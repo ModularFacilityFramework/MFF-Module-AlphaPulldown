@@ -21,13 +21,14 @@ import React, { useCallback, useEffect, useState } from 'react';
 import ProjectBar from './ProjectBar';
 import StatsStrip from './StatsStrip';
 import StagePlaceholder from './StagePlaceholder';
+import SequencesTab from './SequencesTab';
 import SetupTab from './SetupTab';
 import PageAccessTab from './PageAccessTab';
 import styles from '../styles/AlphaPulldownTab.module.css';
 
 // stage: a pipeline tab (needs a selected project, shows the stats strip).
 const TABS = [
-  { key: 'sequences', label: 'Sequences', stage: 'sequences', component: StagePlaceholder },
+  { key: 'sequences', label: 'Sequences', stage: 'sequences', component: SequencesTab },
   { key: 'msa', label: 'MSA (CPU)', stage: 'msa', component: StagePlaceholder },
   { key: 'cofold', label: 'Co-folding (GPU)', stage: 'cofold', component: StagePlaceholder },
   { key: 'setup', label: 'Setup', component: SetupTab }
@@ -41,7 +42,11 @@ function AlphaPulldownTab({ coreApi }) {
   const [activeTab, setActiveTab] = useState(null);
   const [projects, setProjects] = useState(null);
   const [projectId, setProjectId] = useState(null);
-  const [stats, setStats] = useState(null);
+  // Stats are kept with the project they belong to, so switching project
+  // never shows the previous project's numbers while the new ones load -
+  // but a refresh after an edit keeps the old numbers up instead of flashing.
+  const [statsState, setStatsState] = useState({ projectId: null, data: null });
+  const [statsVersion, setStatsVersion] = useState(0);
   const [loadError, setLoadError] = useState('');
 
   useEffect(() => {
@@ -70,15 +75,18 @@ function AlphaPulldownTab({ coreApi }) {
   useEffect(() => { loadProjects(); }, [loadProjects]);
 
   useEffect(() => {
-    if (!projectId) {
-      setStats(null);
-      return;
-    }
-    setStats(null);
+    if (!projectId) return;
     api.get(`/alphapulldown/projects/${projectId}/stats`)
-      .then(res => setStats(res.data))
-      .catch(() => setStats(null));
-  }, [api, projectId]);
+      .then(res => setStatsState({ projectId, data: res.data }))
+      .catch(() => setStatsState({ projectId, data: null }));
+  }, [api, projectId, statsVersion]);
+
+  // Something in the selected project changed (sequences added or removed):
+  // recompute the stats strip and refresh the project list's counts.
+  const handleChanged = useCallback(() => {
+    setStatsVersion(v => v + 1);
+    loadProjects();
+  }, [loadProjects]);
 
   function handleCreate(name, mode) {
     return api.post('/alphapulldown/projects', { name, mode }).then(res => loadProjects(res.data.id));
@@ -101,6 +109,7 @@ function AlphaPulldownTab({ coreApi }) {
   const ActiveComponent = currentTab.component;
   const currentProject = projects.find(p => p.id === projectId) || null;
   const needsProject = !!currentTab.stage;
+  const stats = statsState.projectId === projectId ? statsState.data : null;
 
   return (
     <div>
@@ -131,7 +140,7 @@ function AlphaPulldownTab({ coreApi }) {
         {needsProject && !currentProject ? (
           <div className={styles.empty}>Create a project above to begin.</div>
         ) : (
-          <ActiveComponent coreApi={coreApi} stage={currentTab.stage} project={currentProject} />
+          <ActiveComponent coreApi={coreApi} stage={currentTab.stage} project={currentProject} onChanged={handleChanged} />
         )}
       </div>
     </div>

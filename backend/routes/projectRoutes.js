@@ -7,15 +7,11 @@ const fs = require('fs').promises;
 const path = require('path');
 const { MODES, computeStats } = require('../services/sequenceStats');
 const { projectDir, isInside, MODULE_DIRNAME } = require('../services/projectPaths');
+const { findProject } = require('../services/projectAccess');
 const { DEFAULT_SETTINGS } = require('./settingsRoutes');
 
 module.exports = function buildRouter(coreApi) {
   const router = express.Router();
-
-  async function findProject(conn, id, ownerId) {
-    const rows = await conn.query('SELECT * FROM alphapulldown_projects WHERE id = ? AND owner_id = ?', [id, ownerId]);
-    return rows[0] || null;
-  }
 
   async function statsFor(conn, project, ownerId) {
     const [rows, settingsRows] = await Promise.all([

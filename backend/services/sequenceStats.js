@@ -140,4 +140,10 @@ function computeStats(rows, { mode = 'pulldown', limitAA = 0 } = {}) {
   return stats;
 }
 
-module.exports = { MODES, computeStats };
+// Which sequence roles a project of this mode holds: baits and candidates for
+// a pulldown, one undifferentiated list otherwise.
+function rolesForMode(mode) {
+  return mode === 'pulldown' ? ['bait', 'candidate'] : ['all'];
+}
+
+module.exports = { MODES, computeStats, rolesForMode };

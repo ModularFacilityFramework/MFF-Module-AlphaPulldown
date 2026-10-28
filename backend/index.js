@@ -7,6 +7,7 @@ const manifest = require('../module.manifest.json');
 const createPool = require('./config/database');
 const buildSettingsRouter = require('./routes/settingsRoutes');
 const buildProjectRouter = require('./routes/projectRoutes');
+const buildSequenceRouter = require('./routes/sequenceRoutes');
 const buildPageAccessRouter = require('./routes/pageAccessRoutes');
 
 module.exports = function register(coreApi) {
@@ -17,6 +18,7 @@ module.exports = function register(coreApi) {
   const router = express.Router();
   router.use(buildSettingsRouter(moduleApi));
   router.use(buildProjectRouter(moduleApi));
+  router.use(buildSequenceRouter(moduleApi));
   router.use(buildPageAccessRouter(moduleApi));
   return {
     router,
