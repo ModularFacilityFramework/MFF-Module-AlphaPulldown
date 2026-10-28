@@ -1,9 +1,9 @@
 {
-  "id": "abcfold",
-  "label": "ABCFold",
-  "version": "0.1.72",
-  "tablePrefix": "abcfold_",
-  "mountPath": "/abcfold",
+  "id": "alphapulldown",
+  "label": "AlphaPulldown",
+  "version": "0.1.2",
+  "tablePrefix": "alphapulldown_",
+  "mountPath": "/alphapulldown",
   "backendEntry": "backend/index.js",
   "frontendEntry": "frontend/index.js",
   "requires": [

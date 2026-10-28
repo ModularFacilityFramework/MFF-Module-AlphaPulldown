@@ -1,4 +1,4 @@
-// Builds the sbatch script text for a job draft. abcfoldRoutes.js's POST
+// Builds the sbatch script text for a job draft. alphapulldownRoutes.js's POST
 // /jobs/:id/submit writes this text to disk itself, as workDir/submit.sh -
 // the Slurm module requires workDir to already exist with that exact
 // script (and any input files) in place before it will submit it
@@ -12,7 +12,7 @@
 // gres/cpusPerTask/mem/time - see buildSbatchScript's own params) is NOT a
 // constant like this: partition comes from live cluster detection, the
 // rest are this module's own configured defaults, both resolved by the
-// caller (backend/routes/abcfoldRoutes.js's resolveClusterResources())
+// caller (backend/routes/alphapulldownRoutes.js's resolveClusterResources())
 // before this function ever runs - this file just writes out whatever it's
 // handed.
 const NODES = 1;
@@ -50,7 +50,7 @@ function buildSbatchScript({ slug, settings, abcfoldCommand, outputDir, email, r
     // that detection itself came back empty), gres is computed directly
     // from the requested GPU count. cpus-per-task/mem/time are this
     // module's own configured resource request (Setup tab), not looked
-    // up from anywhere - see backend/routes/abcfoldRoutes.js's
+    // up from anywhere - see backend/routes/alphapulldownRoutes.js's
     // resolveClusterResources().
     `#SBATCH --partition=${resources.partition}`,
     `#SBATCH --gres=${resources.gres}`,
@@ -77,7 +77,7 @@ function buildSbatchScript({ slug, settings, abcfoldCommand, outputDir, email, r
   }
 
   // env_manager is either 'micromamba' or 'conda' (validated/defaulted in
-  // abcfoldRoutes.js's PUT /settings); the two have different shell-hook
+  // alphapulldownRoutes.js's PUT /settings); the two have different shell-hook
   // activation syntax.
   const activationLines = settings.env_manager === 'conda'
     ? ['eval "$(conda shell.bash hook)"', `conda activate ${settings.env_name}`]

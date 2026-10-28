@@ -14,7 +14,7 @@ const KNOWN_PAGES = [
 module.exports = function buildRouter(coreApi) {
   const router = express.Router();
 
-  // GET /api/abcfold/page-access - any authenticated user (the frontend
+  // GET /api/alphapulldown/page-access - any authenticated user (the frontend
   // uses this to decide which tabs to even show). `roles` comes straight
   // from coreApi.listRoles() - the real, authoritative role list core
   // exposes (see docs/MFF-Core_module-core-api.md's coreApi contract) - never invented or
@@ -23,7 +23,7 @@ module.exports = function buildRouter(coreApi) {
     const conn = await coreApi.pool.getConnection();
     try {
       const roles = await coreApi.listRoles();
-      const rows = await conn.query('SELECT page_key, role FROM abcfold_page_access');
+      const rows = await conn.query('SELECT page_key, role FROM alphapulldown_page_access');
       const access = {};
       for (const page of KNOWN_PAGES) access[page.key] = [];
       for (const row of rows) {
@@ -38,7 +38,7 @@ module.exports = function buildRouter(coreApi) {
     }
   });
 
-  // PUT /api/abcfold/page-access - staff-only, replaces the whole table.
+  // PUT /api/alphapulldown/page-access - staff-only, replaces the whole table.
   // Requested roles are checked against coreApi.listRoles() - only real,
   // currently-valid role names ever get stored.
   router.put('/page-access', coreApi.authenticateToken, coreApi.checkRole(['developer', 'administrator']), async (req, res) => {
@@ -49,12 +49,12 @@ module.exports = function buildRouter(coreApi) {
     try {
       const validRoles = await coreApi.listRoles();
       await conn.beginTransaction();
-      await conn.query('DELETE FROM abcfold_page_access');
+      await conn.query('DELETE FROM alphapulldown_page_access');
       for (const page of KNOWN_PAGES) {
         const requestedRoles = Array.isArray(access[page.key]) ? access[page.key] : [];
         for (const role of requestedRoles) {
           if (!validRoles.includes(role)) continue;
-          await conn.query('INSERT INTO abcfold_page_access (page_key, role) VALUES (?, ?)', [page.key, role]);
+          await conn.query('INSERT INTO alphapulldown_page_access (page_key, role) VALUES (?, ?)', [page.key, role]);
         }
       }
       await conn.commit();

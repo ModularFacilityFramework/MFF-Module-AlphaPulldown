@@ -18,7 +18,7 @@
 // - so the UI could only ever say "not reachable", even when the real
 // reason was "this specific person has no Slurm access", which has
 // nothing to do with reachability. Now it returns status/error too, so
-// callers (abcfoldRoutes.js's getRequestContext) can tell those apart.
+// callers (alphapulldownRoutes.js's getRequestContext) can tell those apart.
 //
 // No getResourceProfile()/GET /external/resource-profile here anymore -
 // that endpoint is admin-configured policy on the Slurm module's side,
@@ -26,7 +26,7 @@
 // it. This module now owns its own resource request outright (partition
 // picked from this same gpu-partitions list, gres computed from the
 // requested GPU count, cpus/mem/time from this module's own settings -
-// see backend/routes/abcfoldRoutes.js and backend/services/sbatchTemplateBuilder.js)
+// see backend/routes/alphapulldownRoutes.js and backend/services/sbatchTemplateBuilder.js)
 // instead of depending on a policy table that may never exist.
 async function listGpuPartitions(coreApi, token) {
   const r = await coreApi.callModule(token, 'slurm', 'GET', '/external/gpu-partitions');
@@ -35,7 +35,7 @@ async function listGpuPartitions(coreApi, token) {
 
 // workDir must already exist on disk and already contain a submit.sh
 // script plus any input files the job needs, written there by the CALLER
-// (this module - see abcfoldRoutes.js's POST /jobs/:id/submit) before this
+// (this module - see alphapulldownRoutes.js's POST /jobs/:id/submit) before this
 // is ever called. The Slurm module treats workDir as an opaque string,
 // passed straight to `sbatch --chdir` - it never creates, writes into, or
 // reads it itself (docs/MFF-Module-SLURM_slurm-config.md).
@@ -57,6 +57,6 @@ async function getJobStatus(coreApi, token, jobId) {
 // no file-listing/download routes at all (it never reads workDir's
 // contents, so it can't serve them back). Since this module is the one
 // that wrote workDir in the first place, it reads its own files straight
-// off disk itself - see abcfoldRoutes.js's GET /jobs/:id/files[/:filename].
+// off disk itself - see alphapulldownRoutes.js's GET /jobs/:id/files[/:filename].
 
 module.exports = { listGpuPartitions, submitJob, getJobStatus };

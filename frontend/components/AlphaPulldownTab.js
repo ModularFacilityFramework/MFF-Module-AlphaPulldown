@@ -4,12 +4,12 @@
 // plain React state, not real routes.
 //
 // No page-level heading here on purpose: this already renders as a
-// labeled tab inside Dashboard's own tab bar (manifest.label, "ABCFold"),
+// labeled tab inside Dashboard's own tab bar (manifest.label, "AlphaPulldown"),
 // plus a matching sidebar button (sidebarEntry: true) - core's module UI
 // guide is explicit that a module shouldn't add a second title on top of
 // either.
 //
-// Tab visibility is gated by GET /abcfold/page-access (see
+// Tab visibility is gated by GET /alphapulldown/page-access (see
 // backend/routes/pageAccessRoutes.js): staff (canManageUsers) always see
 // every tab plus the staff-only Page Access tab itself; everyone else only
 // sees tabs a role of theirs has been granted.
@@ -18,7 +18,7 @@ import SetupTab from './SetupTab';
 import RunTab from './RunTab';
 import ResultsTab from './ResultsTab';
 import PageAccessTab from './PageAccessTab';
-import styles from '../styles/ABCFoldTab.module.css';
+import styles from '../styles/AlphaPulldownTab.module.css';
 
 const TABS = [
   { key: 'setup', label: 'Setup', component: SetupTab },
@@ -26,7 +26,7 @@ const TABS = [
   { key: 'results', label: 'Results', component: ResultsTab }
 ];
 
-function ABCFoldTab({ coreApi }) {
+function AlphaPulldownTab({ coreApi }) {
   const { api, useAuth, useRoles } = coreApi;
   const { userData } = useAuth();
   const { canManageUsers, roles: userRoles } = useRoles(userData);
@@ -46,7 +46,7 @@ function ABCFoldTab({ coreApi }) {
   const [editingJobId, setEditingJobId] = useState(null);
 
   useEffect(() => {
-    api.get('/abcfold/page-access')
+    api.get('/alphapulldown/page-access')
       .then(res => setAccess(res.data.access))
       .catch(() => setAccess({}));
   }, [api]);
@@ -128,4 +128,4 @@ function ABCFoldTab({ coreApi }) {
   );
 }
 
-export default ABCFoldTab;
+export default AlphaPulldownTab;

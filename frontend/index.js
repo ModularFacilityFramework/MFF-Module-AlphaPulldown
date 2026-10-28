@@ -12,16 +12,16 @@
 // button - it just lands on Dashboard with this tab already selected,
 // instead of a second route/component. position: land in a gap between
 // core's own tabs (5/10/15) - an admin can override this per deployment via
-// MODULE_ABCFOLD_DASHBOARD_POSITION in App_backend/.env without touching
+// MODULE_ALPHAPULLDOWN_DASHBOARD_POSITION in App_backend/.env without touching
 // this file at all.
-import ABCFoldTab from './components/ABCFoldTab';
+import AlphaPulldownTab from './components/AlphaPulldownTab';
 import manifest from '../module.manifest.json';
 
 export function register(coreApi) {
   coreApi.registerDashboardTab(manifest.id, {
     key: manifest.id,
     label: manifest.label,
-    component: () => <ABCFoldTab coreApi={coreApi} />,
+    component: () => <AlphaPulldownTab coreApi={coreApi} />,
     position: 20,
     sidebarEntry: true
   });

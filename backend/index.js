@@ -5,7 +5,7 @@
 const express = require('express');
 const manifest = require('../module.manifest.json');
 const createPool = require('./config/database');
-const buildAbcfoldRouter = require('./routes/abcfoldRoutes');
+const buildAlphapulldownRouter = require('./routes/alphapulldownRoutes');
 const buildPageAccessRouter = require('./routes/pageAccessRoutes');
 
 module.exports = function register(coreApi) {
@@ -14,7 +14,7 @@ module.exports = function register(coreApi) {
   // pool at require() time like before (see config/database.js).
   const moduleApi = { ...coreApi, pool: createPool(coreApi) };
   const router = express.Router();
-  router.use(buildAbcfoldRouter(moduleApi));
+  router.use(buildAlphapulldownRouter(moduleApi));
   router.use(buildPageAccessRouter(moduleApi));
   return {
     router,

@@ -1,5 +1,5 @@
-// Setup tab - sbatch/cluster and ABCFold defaults, one row per user
-// (GET/PUT /abcfold/settings). Only ever touches core through the coreApi
+// Setup tab - sbatch/cluster and AlphaPulldown defaults, one row per user
+// (GET/PUT /alphapulldown/settings). Only ever touches core through the coreApi
 // prop - see docs/MFF-Core_module-core-api.md for the contract.
 import React, { useEffect, useState } from 'react';
 import styles from '../styles/SetupTab.module.css';
@@ -15,8 +15,8 @@ const FIELDS = [
 ];
 
 // This module's own resource request - not looked up from anywhere, just
-// what an ABCFold job actually needs to run (see backend/db/schema.sql's
-// abcfold_settings table comment). Partition is handled separately, as a
+// what an AlphaPulldown job actually needs to run (see backend/db/schema.sql's
+// alphapulldown_settings table comment). Partition is handled separately, as a
 // dropdown built from live cluster data when there is any (see the
 // Partition field below) - these three are always used as typed.
 const RESOURCE_FIELDS = [
@@ -47,7 +47,7 @@ function SetupTab({ coreApi }) {
   const [previewEdited, setPreviewEdited] = useState(false);
 
   useEffect(() => {
-    api.get('/abcfold/settings')
+    api.get('/alphapulldown/settings')
       .then(res => {
         const data = res.data;
         // If the saved default_partition isn't one of the live cluster's
@@ -65,7 +65,7 @@ function SetupTab({ coreApi }) {
   }, [api]);
 
   function refreshPreview() {
-    return api.post('/abcfold/settings/preview', form)
+    return api.post('/alphapulldown/settings/preview', form)
       .then(res => setForm(f => (f ? { ...f, sbatchPreview: res.data.sbatchPreview } : f)))
       .catch(() => {});
   }
@@ -95,7 +95,7 @@ function SetupTab({ coreApi }) {
     e.preventDefault();
     setSaving(true);
     setError('');
-    api.put('/abcfold/settings', form)
+    api.put('/alphapulldown/settings', form)
       .then(res => {
         setForm(res.data);
         setSaved(true);
@@ -124,7 +124,7 @@ function SetupTab({ coreApi }) {
   return (
     <form className={styles.form} onSubmit={handleSubmit}>
       <p className={styles.submissionNote}>
-        Partition/CPUs/memory/wall time below are this module&apos;s own resource request for an ABCFold
+        Partition/CPUs/memory/wall time below are this module&apos;s own resource request for an AlphaPulldown
         job - real defaults, not something waiting on any external configuration. Partition is a dropdown
         of this cluster&apos;s actual GPU partitions when that data is available, defaulting to one that
         actually has GPUs; otherwise it&apos;s a plain field you can type into yourself. GRES scales with
@@ -142,7 +142,7 @@ function SetupTab({ coreApi }) {
       {!workspace.active && (
         <p className={styles.errorBanner}>
           Your workspace storage isn&apos;t available ({workspace.reason || 'unknown reason'}) — you
-          can&apos;t create or submit ABCFold jobs until this is resolved. Contact an administrator.
+          can&apos;t create or submit AlphaPulldown jobs until this is resolved. Contact an administrator.
         </p>
       )}
 

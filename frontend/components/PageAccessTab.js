@@ -27,7 +27,7 @@ function PageAccessTab({ coreApi }) {
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    api.get('/abcfold/page-access')
+    api.get('/alphapulldown/page-access')
       .then(res => { setPages(res.data.pages); setRoles(res.data.roles); setAccess(res.data.access); })
       .catch(err => setError(err.message))
       .finally(() => setLoading(false));
@@ -46,7 +46,7 @@ function PageAccessTab({ coreApi }) {
   function handleSave() {
     setSaving(true);
     setError('');
-    api.put('/abcfold/page-access', { access })
+    api.put('/alphapulldown/page-access', { access })
       .then(() => setSaved(true))
       .catch(err => setError(err.message))
       .finally(() => setSaving(false));

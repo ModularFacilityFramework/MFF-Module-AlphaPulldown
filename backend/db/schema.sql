@@ -1,7 +1,7 @@
 -- This module's own tables. No migrations, ever - this file is the single
 -- source of truth for this module's schema, edited directly (same rule as
 -- mff-core's own App_backend/install/schema.sql). Every table MUST be
--- prefixed with module.manifest.json's tablePrefix ("abcfold_" -
+-- prefixed with module.manifest.json's tablePrefix ("alphapulldown_" -
 -- rename both together if you rename the module).
 --
 -- Imported by mff-core's own moduleDatabaseProvisioner.js, against this
@@ -10,10 +10,10 @@
 -- how this module reads it, and mff-core's own
 -- docs/MFF-Core_module-database-provisioning.md for how core provisions it.
 
--- One row per user, upserted from the Setup tab. Holds ABCFold's OWN
+-- One row per user, upserted from the Setup tab. Holds AlphaPulldown's OWN
 -- resource request outright: default_partition/default_cpus_per_task/
 -- default_mem/default_time are this module's own settings for what an
--- ABCFold job actually needs to run (matching a real, known-working
+-- AlphaPulldown job actually needs to run (matching a real, known-working
 -- reference script for this cluster - njp158's pyp1_abcfold.slurm), not
 -- something dependent on an admin having configured anything on the
 -- Slurm module's side. The GRES request is computed at job-creation time
@@ -26,9 +26,9 @@
 -- coreApi.listUsers() for email), and each job's output directory comes
 -- from coreApi.getUserWorkspacePath(req.user) - neither is cached in this
 -- module's own table. If that workspace isn't active for a user (see
--- abcfoldRoutes.js's POST /jobs and /jobs/:id/submit), this module
+-- alphapulldownRoutes.js's POST /jobs and /jobs/:id/submit), this module
 -- refuses to create or submit jobs for them at all.
-CREATE TABLE IF NOT EXISTS abcfold_settings (
+CREATE TABLE IF NOT EXISTS alphapulldown_settings (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   owner_id BIGINT NOT NULL,
   slurm_mail_type VARCHAR(50) NOT NULL DEFAULT 'BEGIN,END,FAIL',
@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS abcfold_settings (
   -- Real local database on this cluster (full AlphaFold3 bundle:
   -- uniref90/uniref30/bfd/mgnify/pdb70/pdb_seqres/pdb_mmcif/uniprot/
   -- params) - an available alternative to --mmseqs2 below, not the
-  -- default; see abcfoldRoutes.js's DEFAULT_SETTINGS for why.
+  -- default; see alphapulldownRoutes.js's DEFAULT_SETTINGS for why.
   default_database_dir VARCHAR(500) NOT NULL DEFAULT '/home/linuxhomes/software/genetic_db',
   -- Matches njp158's own known-working reference script - real, proven
   -- working on this cluster.
@@ -68,13 +68,13 @@ CREATE TABLE IF NOT EXISTS abcfold_settings (
 -- vocabulary verbatim (PENDING/RUNNING/COMPLETED/FAILED/CANCELLED/etc,
 -- refreshed on every GET /jobs/:id/status poll) - see
 -- backend/services/slurmClient.js.
-CREATE TABLE IF NOT EXISTS abcfold_jobs (
+CREATE TABLE IF NOT EXISTS alphapulldown_jobs (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   owner_id BIGINT NOT NULL,
   -- Per-owner sequential number (1, 2, 3, ...) - NOT the same as id, which
   -- is global across every user. Shown to the user as "J<job_number>" and
   -- used to name that job's own workDir under the user's workspace
-  -- (see abcfoldRoutes.js's POST /jobs: MAX(job_number)+1 for this owner_id).
+  -- (see alphapulldownRoutes.js's POST /jobs: MAX(job_number)+1 for this owner_id).
   -- DEFAULT 0 exists only so mff-core's schema-diffing ADD COLUMN can add
   -- this column to an already-populated table (it refuses a NOT NULL
   -- column with no DEFAULT on a non-empty table, on purpose - see
@@ -115,7 +115,7 @@ CREATE TABLE IF NOT EXISTS abcfold_jobs (
 -- Which roles can see which of this module's tabs (Page Access tab, staff
 -- only). A page with no rows here is invisible to non-staff users - staff
 -- (canManageUsers) always see every tab regardless of this table's content.
-CREATE TABLE IF NOT EXISTS abcfold_page_access (
+CREATE TABLE IF NOT EXISTS alphapulldown_page_access (
   page_key VARCHAR(100) NOT NULL,
   role VARCHAR(50) NOT NULL,
   PRIMARY KEY (page_key, role)

@@ -58,7 +58,7 @@ function extractRunParams(body) {
 // this ever changes.
 const TERMINAL_STATES = ['COMPLETED', 'FAILED', 'CANCELLED', 'TIMEOUT', 'NODE_FAIL', 'OUT_OF_MEMORY', 'PREEMPTED', 'DEADLINE', 'BOOT_FAIL'];
 
-// Used whenever a user has no abcfold_settings row yet, so GET always
+// Used whenever a user has no alphapulldown_settings row yet, so GET always
 // returns something PUT can upsert without the frontend special-casing
 // "no settings saved yet" vs "existing settings". default_partition/
 // default_cpus_per_task/default_mem/default_time are this module's OWN
@@ -291,7 +291,7 @@ async function buildJobArtifacts(coreApi, req, conn, body) {
     return { error: { status: 503, body: { error: 'Workspace storage is not available for this user.' } } };
   }
 
-  const settingsRows = await conn.query('SELECT * FROM abcfold_settings WHERE owner_id = ?', [req.user.id]);
+  const settingsRows = await conn.query('SELECT * FROM alphapulldown_settings WHERE owner_id = ?', [req.user.id]);
   const settings = settingsRows[0] || DEFAULT_SETTINGS;
   const { partition, gres } = await resolveClusterResources(coreApi, req, settings, requestedGpuCount);
 
@@ -371,20 +371,20 @@ async function submitJobToSlurm(coreApi, req, conn, job, runParams) {
     return { success: false, status: result.status || 502, error: result.error };
   }
 
-  await conn.query('UPDATE abcfold_jobs SET status = ?, slurm_job_id = ? WHERE id = ?', ['SUBMITTED', result.jobId, job.id]);
-  const updated = await conn.query('SELECT * FROM abcfold_jobs WHERE id = ?', [job.id]);
+  await conn.query('UPDATE alphapulldown_jobs SET status = ?, slurm_job_id = ? WHERE id = ?', ['SUBMITTED', result.jobId, job.id]);
+  const updated = await conn.query('SELECT * FROM alphapulldown_jobs WHERE id = ?', [job.id]);
   return { success: true, job: updated[0] };
 }
 
 module.exports = function buildRouter(coreApi) {
   const router = express.Router();
 
-  // GET /api/abcfold/settings - the caller's own sbatch/ABCFold defaults,
+  // GET /api/alphapulldown/settings - the caller's own sbatch/AlphaPulldown defaults,
   // plus read-only account/email/cluster-resource info and a script preview.
   router.get('/settings', coreApi.authenticateToken, async (req, res) => {
     const conn = await coreApi.pool.getConnection();
     try {
-      const rows = await conn.query('SELECT * FROM abcfold_settings WHERE owner_id = ?', [req.user.id]);
+      const rows = await conn.query('SELECT * FROM alphapulldown_settings WHERE owner_id = ?', [req.user.id]);
       const settings = rows[0] || { ...DEFAULT_SETTINGS, owner_id: req.user.id };
       res.json(await buildSettingsResponse(coreApi, req, settings));
     } catch (err) {
@@ -394,7 +394,7 @@ module.exports = function buildRouter(coreApi) {
     }
   });
 
-  // PUT /api/abcfold/settings - upsert on owner_id
+  // PUT /api/alphapulldown/settings - upsert on owner_id
   router.put('/settings', coreApi.authenticateToken, async (req, res) => {
     const values = normalizeSettings(req.body);
 
@@ -404,11 +404,11 @@ module.exports = function buildRouter(coreApi) {
       const placeholders = columns.map(() => '?').join(', ');
       const updateClause = SETTINGS_FIELDS.map(f => `${f} = VALUES(${f})`).join(', ');
       await conn.query(
-        `INSERT INTO abcfold_settings (${columns.join(', ')}) VALUES (${placeholders})
+        `INSERT INTO alphapulldown_settings (${columns.join(', ')}) VALUES (${placeholders})
          ON DUPLICATE KEY UPDATE ${updateClause}`,
         [req.user.id, ...SETTINGS_FIELDS.map(f => values[f])]
       );
-      const rows = await conn.query('SELECT * FROM abcfold_settings WHERE owner_id = ?', [req.user.id]);
+      const rows = await conn.query('SELECT * FROM alphapulldown_settings WHERE owner_id = ?', [req.user.id]);
       res.json(await buildSettingsResponse(coreApi, req, rows[0]));
     } catch (err) {
       res.status(500).json({ error: 'Failed to save settings', message: err.message });
@@ -417,7 +417,7 @@ module.exports = function buildRouter(coreApi) {
     }
   });
 
-  // POST /api/abcfold/settings/preview - regenerates the sbatch preview from
+  // POST /api/alphapulldown/settings/preview - regenerates the sbatch preview from
   // whatever's currently in the Setup tab's form, without saving anything.
   // Lets the preview update live as the user edits fields, instead of only
   // refreshing after a real Save.
@@ -429,12 +429,12 @@ module.exports = function buildRouter(coreApi) {
     }
   });
 
-  // GET /api/abcfold/jobs - the caller's own job drafts, list view
+  // GET /api/alphapulldown/jobs - the caller's own job drafts, list view
   router.get('/jobs', coreApi.authenticateToken, async (req, res) => {
     const conn = await coreApi.pool.getConnection();
     try {
       const rows = await conn.query(
-        'SELECT id, job_number, name, status, models_selected, created_at FROM abcfold_jobs WHERE owner_id = ? ORDER BY created_at DESC',
+        'SELECT id, job_number, name, status, models_selected, created_at FROM alphapulldown_jobs WHERE owner_id = ? ORDER BY created_at DESC',
         [req.user.id]
       );
       res.json(rows);
@@ -445,13 +445,13 @@ module.exports = function buildRouter(coreApi) {
     }
   });
 
-  // GET /api/abcfold/jobs/:id - full draft, ownership check baked into the
+  // GET /api/alphapulldown/jobs/:id - full draft, ownership check baked into the
   // WHERE clause so this never reveals whether another user's job exists.
   router.get('/jobs/:id', coreApi.authenticateToken, async (req, res) => {
     const conn = await coreApi.pool.getConnection();
     try {
       const rows = await conn.query(
-        'SELECT * FROM abcfold_jobs WHERE id = ? AND owner_id = ?',
+        'SELECT * FROM alphapulldown_jobs WHERE id = ? AND owner_id = ?',
         [req.params.id, req.user.id]
       );
       if (rows.length === 0) return res.status(404).json({ error: 'Job not found' });
@@ -463,7 +463,7 @@ module.exports = function buildRouter(coreApi) {
     }
   });
 
-  // POST /api/abcfold/jobs/preview - same validation and generation as
+  // POST /api/alphapulldown/jobs/preview - same validation and generation as
   // POST /jobs, but touches neither the database nor the filesystem. Lets
   // the Run tab show (and let the user edit) a real sbatch script before
   // ever creating a job, the same live-preview pattern already used by
@@ -492,7 +492,7 @@ module.exports = function buildRouter(coreApi) {
     }
   });
 
-  // POST /api/abcfold/jobs - generates the AF3 input JSON, abcfold command,
+  // POST /api/alphapulldown/jobs - generates the AF3 input JSON, abcfold command,
   // and sbatch script, persists them, and immediately submits to Slurm in
   // the same request - no separate draft-review step. req.body.scriptContent,
   // if present, is stored and used exactly as given (the Run tab's preview
@@ -538,9 +538,9 @@ module.exports = function buildRouter(coreApi) {
       // id - shown to the user as "J<jobNumber>" and used to name this job's
       // own workDir, under this module's own subfolder of the user's core
       // workspace (workspace.path is just the user's raw core-provisioned
-      // directory - core has no notion of "module-ABCFold" inside it).
+      // directory - core has no notion of "module-AlphaPulldown" inside it).
       const numberRows = await conn.query(
-        'SELECT COALESCE(MAX(job_number), 0) + 1 AS nextNumber FROM abcfold_jobs WHERE owner_id = ?',
+        'SELECT COALESCE(MAX(job_number), 0) + 1 AS nextNumber FROM alphapulldown_jobs WHERE owner_id = ?',
         [req.user.id]
       );
       const jobNumber = numberRows[0].nextNumber;
@@ -549,15 +549,15 @@ module.exports = function buildRouter(coreApi) {
       // handed to the Slurm module as workDir - it must already exist with
       // those files in place before that module will touch it
       // (docs/MFF-Module-SLURM_slurm-config.md).
-      const workDir = `${workspace.path}/module-ABCFold/J${jobNumber}`.replace(/\/+/g, '/');
+      const workDir = `${workspace.path}/module-AlphaPulldown/J${jobNumber}`.replace(/\/+/g, '/');
 
       const result = await conn.query(
-        `INSERT INTO abcfold_jobs
+        `INSERT INTO alphapulldown_jobs
           (owner_id, job_number, name, status, models_selected, output_dir, input_json_filename, input_json, abcfold_command, sbatch_script)
          VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?)`,
         [req.user.id, jobNumber, name, models.join(','), workDir, inputJsonFilename, JSON.stringify(af3Input, null, 2), abcfoldCommand, scriptContent]
       );
-      const rows = await conn.query('SELECT * FROM abcfold_jobs WHERE id = ?', [result.insertId]);
+      const rows = await conn.query('SELECT * FROM alphapulldown_jobs WHERE id = ?', [result.insertId]);
       const job = rows[0];
 
       const submitResult = await submitJobToSlurm(coreApi, req, conn, job, extractRunParams(req.body));
@@ -574,7 +574,7 @@ module.exports = function buildRouter(coreApi) {
     }
   });
 
-  // POST /api/abcfold/jobs/:id/submit - resubmit path, for either a job
+  // POST /api/alphapulldown/jobs/:id/submit - resubmit path, for either a job
   // stuck in status='draft' (POST /jobs's own automatic submit attempt
   // failed - workspace gone, fs error, Slurm unreachable) or a job that
   // already reached Slurm and finished (TERMINAL_STATES below - failed,
@@ -598,7 +598,7 @@ module.exports = function buildRouter(coreApi) {
   router.post('/jobs/:id/submit', coreApi.authenticateToken, async (req, res) => {
     const conn = await coreApi.pool.getConnection();
     try {
-      const jobRows = await conn.query('SELECT * FROM abcfold_jobs WHERE id = ? AND owner_id = ?', [req.params.id, req.user.id]);
+      const jobRows = await conn.query('SELECT * FROM alphapulldown_jobs WHERE id = ? AND owner_id = ?', [req.params.id, req.user.id]);
       if (jobRows.length === 0) return res.status(404).json({ error: 'Job not found' });
       const existingJob = jobRows[0];
       if (existingJob.slurm_job_id && !TERMINAL_STATES.includes(existingJob.status)) {
@@ -622,13 +622,13 @@ module.exports = function buildRouter(coreApi) {
         : req.body.inputJsonFilename;
 
       await conn.query(
-        `UPDATE abcfold_jobs
+        `UPDATE alphapulldown_jobs
           SET name = ?, status = 'draft', slurm_job_id = NULL, models_selected = ?,
               input_json_filename = ?, input_json = ?, abcfold_command = ?, sbatch_script = ?
          WHERE id = ?`,
         [name, models.join(','), inputJsonFilename, JSON.stringify(af3Input, null, 2), abcfoldCommand, scriptContent, existingJob.id]
       );
-      const rows = await conn.query('SELECT * FROM abcfold_jobs WHERE id = ?', [existingJob.id]);
+      const rows = await conn.query('SELECT * FROM alphapulldown_jobs WHERE id = ?', [existingJob.id]);
       const job = rows[0];
 
       const submitResult = await submitJobToSlurm(coreApi, req, conn, job, extractRunParams(req.body));
@@ -643,7 +643,7 @@ module.exports = function buildRouter(coreApi) {
     }
   });
 
-  // DELETE /api/abcfold/jobs/:id - removes a job's own folder and its DB
+  // DELETE /api/alphapulldown/jobs/:id - removes a job's own folder and its DB
   // row. Same ownership + in-flight guard as POST /jobs/:id/submit above -
   // can't delete something still running on the cluster (409), but a
   // 'draft' job (never reached Slurm, or failed to submit) is freely
@@ -654,7 +654,7 @@ module.exports = function buildRouter(coreApi) {
   router.delete('/jobs/:id', coreApi.authenticateToken, async (req, res) => {
     const conn = await coreApi.pool.getConnection();
     try {
-      const jobRows = await conn.query('SELECT * FROM abcfold_jobs WHERE id = ? AND owner_id = ?', [req.params.id, req.user.id]);
+      const jobRows = await conn.query('SELECT * FROM alphapulldown_jobs WHERE id = ? AND owner_id = ?', [req.params.id, req.user.id]);
       if (jobRows.length === 0) return res.status(404).json({ error: 'Job not found' });
       const job = jobRows[0];
       if (job.slurm_job_id && !TERMINAL_STATES.includes(job.status)) {
@@ -666,7 +666,7 @@ module.exports = function buildRouter(coreApi) {
       } catch (fsErr) {
         return res.status(502).json({ error: 'Failed to delete job folder', message: fsErr.message });
       }
-      await conn.query('DELETE FROM abcfold_jobs WHERE id = ?', [job.id]);
+      await conn.query('DELETE FROM alphapulldown_jobs WHERE id = ?', [job.id]);
       res.status(200).json({ success: true });
     } catch (err) {
       res.status(500).json({ error: 'Failed to delete job', message: err.message });
@@ -675,14 +675,14 @@ module.exports = function buildRouter(coreApi) {
     }
   });
 
-  // GET /api/abcfold/jobs/:id/status - live status from the Slurm module
+  // GET /api/alphapulldown/jobs/:id/status - live status from the Slurm module
   // (slurmClient.getJobStatus()), and refreshes this job's cached status
   // column so the list view stays reasonably fresh without polling Slurm
   // for every job every time.
   router.get('/jobs/:id/status', coreApi.authenticateToken, async (req, res) => {
     const conn = await coreApi.pool.getConnection();
     try {
-      const jobRows = await conn.query('SELECT * FROM abcfold_jobs WHERE id = ? AND owner_id = ?', [req.params.id, req.user.id]);
+      const jobRows = await conn.query('SELECT * FROM alphapulldown_jobs WHERE id = ? AND owner_id = ?', [req.params.id, req.user.id]);
       if (jobRows.length === 0) return res.status(404).json({ error: 'Job not found' });
       const job = jobRows[0];
       if (!job.slurm_job_id) return res.status(400).json({ error: 'Job has not been submitted yet' });
@@ -692,7 +692,7 @@ module.exports = function buildRouter(coreApi) {
         return res.status(result.status || 502).json({ error: 'Failed to fetch job status', message: result.error });
       }
 
-      await conn.query('UPDATE abcfold_jobs SET status = ? WHERE id = ?', [result.state, job.id]);
+      await conn.query('UPDATE alphapulldown_jobs SET status = ? WHERE id = ?', [result.state, job.id]);
       res.json(result);
     } catch (err) {
       res.status(500).json({ error: 'Failed to fetch job status', message: err.message });
@@ -701,7 +701,7 @@ module.exports = function buildRouter(coreApi) {
     }
   });
 
-  // GET /api/abcfold/jobs/:id/files - filenames currently in the job's own
+  // GET /api/alphapulldown/jobs/:id/files - filenames currently in the job's own
   // workDir (job.output_dir), read straight off disk. The Slurm module
   // provides no file-listing route at all anymore - it never reads workDir,
   // so it can't serve its contents back (docs/MFF-Module-SLURM_slurm-config.md).
@@ -719,7 +719,7 @@ module.exports = function buildRouter(coreApi) {
   router.get('/jobs/:id/files', coreApi.authenticateToken, async (req, res) => {
     const conn = await coreApi.pool.getConnection();
     try {
-      const jobRows = await conn.query('SELECT * FROM abcfold_jobs WHERE id = ? AND owner_id = ?', [req.params.id, req.user.id]);
+      const jobRows = await conn.query('SELECT * FROM alphapulldown_jobs WHERE id = ? AND owner_id = ?', [req.params.id, req.user.id]);
       if (jobRows.length === 0) return res.status(404).json({ error: 'Job not found' });
       const job = jobRows[0];
 
@@ -742,7 +742,7 @@ module.exports = function buildRouter(coreApi) {
     }
   });
 
-  // GET /api/abcfold/jobs/:id/download?file=<relative path> - hands back
+  // GET /api/alphapulldown/jobs/:id/download?file=<relative path> - hands back
   // one file's raw content, read straight off disk from job.output_dir
   // (see GET /jobs/:id/files above - same reasoning, the Slurm module
   // provides no download route either, and the same not-gated-on-
@@ -762,7 +762,7 @@ module.exports = function buildRouter(coreApi) {
 
     const conn = await coreApi.pool.getConnection();
     try {
-      const jobRows = await conn.query('SELECT * FROM abcfold_jobs WHERE id = ? AND owner_id = ?', [req.params.id, req.user.id]);
+      const jobRows = await conn.query('SELECT * FROM alphapulldown_jobs WHERE id = ? AND owner_id = ?', [req.params.id, req.user.id]);
       if (jobRows.length === 0) return res.status(404).json({ error: 'Job not found' });
       const job = jobRows[0];
 
@@ -788,13 +788,13 @@ module.exports = function buildRouter(coreApi) {
     }
   });
 
-  // POST /api/abcfold/jobs/:id/report-ticket - mints the ticket the Report
+  // POST /api/alphapulldown/jobs/:id/report-ticket - mints the ticket the Report
   // tab's iframe URL carries. 404 when the job's folder has no index.html
   // (ABCFold writes it only with visualizations on), so the tab can say so.
   router.post('/jobs/:id/report-ticket', coreApi.authenticateToken, async (req, res) => {
     const conn = await coreApi.pool.getConnection();
     try {
-      const jobRows = await conn.query('SELECT * FROM abcfold_jobs WHERE id = ? AND owner_id = ?', [req.params.id, req.user.id]);
+      const jobRows = await conn.query('SELECT * FROM alphapulldown_jobs WHERE id = ? AND owner_id = ?', [req.params.id, req.user.id]);
       if (jobRows.length === 0) return res.status(404).json({ error: 'Job not found' });
       const job = jobRows[0];
 
@@ -813,7 +813,7 @@ module.exports = function buildRouter(coreApi) {
     }
   });
 
-  // GET /api/abcfold/jobs/:id/report/:ticket/<any path inside output_dir> -
+  // GET /api/alphapulldown/jobs/:id/report/:ticket/<any path inside output_dir> -
   // the job's output folder as a static site, for the Report iframe. No
   // authenticateToken: the ticket is the credential (see above). Read-only,
   // and confined to output_dir (lexically and after resolving symlinks).
@@ -831,7 +831,7 @@ module.exports = function buildRouter(coreApi) {
 
     const conn = await coreApi.pool.getConnection();
     try {
-      const jobRows = await conn.query('SELECT output_dir FROM abcfold_jobs WHERE id = ?', [req.params.id]);
+      const jobRows = await conn.query('SELECT output_dir FROM alphapulldown_jobs WHERE id = ?', [req.params.id]);
       if (jobRows.length === 0) return res.status(404).json({ error: 'Job not found' });
 
       let realDir;

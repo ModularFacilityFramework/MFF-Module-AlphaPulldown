@@ -1,4 +1,4 @@
-// Results tab - a card per job (POST /abcfold/jobs creates AND submits in
+// Results tab - a card per job (POST /alphapulldown/jobs creates AND submits in
 // one request now, see RunTab.js - there's no more draft-review step), each
 // opening into a tabbed detail view. status='draft' only ever means "created
 // but failed to submit to Slurm" from here on - never an intentional pause -
@@ -11,9 +11,9 @@
 // job failing (or finishing) shows up without a manual refresh.
 //
 // Resubmit and Clone both hand a job's own job.json (see
-// abcfoldRoutes.js's JOB_PARAMS_FILENAME - the exact Run tab fields it was
+// alphapulldownRoutes.js's JOB_PARAMS_FILENAME - the exact Run tab fields it was
 // submitted with, read back via the existing GET /jobs/:id/download route,
-// same as stdout/stderr) up to ABCFoldTab.js, which switches to the Run tab
+// same as stdout/stderr) up to AlphaPulldownTab.js, which switches to the Run tab
 // pre-filled with them - a real chance to review or edit before it runs
 // again, not a blind rerun. They differ only in what happens on submit:
 // Resubmit reuses this same job's row/workDir (POST /jobs/:id/submit,
@@ -45,7 +45,7 @@ const STATUS_COLORS = {
 
 // Slurm's own standard job-state vocabulary that means a job is done and
 // safe to resubmit - as opposed to still queued/running. Duplicated in
-// backend/routes/abcfoldRoutes.js (frontend and backend can't share a JS
+// backend/routes/alphapulldownRoutes.js (frontend and backend can't share a JS
 // module directly in this architecture) - keep both lists in sync if this
 // ever changes.
 const TERMINAL_STATES = ['COMPLETED', 'FAILED', 'CANCELLED', 'TIMEOUT', 'NODE_FAIL', 'OUT_OF_MEMORY', 'PREEMPTED', 'DEADLINE', 'BOOT_FAIL'];
@@ -102,7 +102,7 @@ function ResultsTab({ coreApi, onGoToSetup, onEditJob, onCloneJob }) {
   const [activeTab, setActiveTab] = useState('script');
 
   // Loading state shared by both Resubmit and Clone while job.json is
-  // being fetched, before handing off to ABCFoldTab.js and switching away
+  // being fetched, before handing off to AlphaPulldownTab.js and switching away
   // from this tab entirely - there's nothing left to show once that
   // happens, so one flag/error pair covers both actions.
   const [paramsLoading, setParamsLoading] = useState(false);
@@ -152,7 +152,7 @@ function ResultsTab({ coreApi, onGoToSetup, onEditJob, onCloneJob }) {
   const [filesError, setFilesError] = useState('');
 
   // reportUrl: where the Report iframe points (a ticketed URL into this
-  // job's own output folder - see the report routes in abcfoldRoutes.js), or
+  // job's own output folder - see the report routes in alphapulldownRoutes.js), or
   // null if not loaded/no report exists. reportError 'none' is a sentinel for
   // "ABCFold wrote no index.html for this job" - distinct from a real
   // failure, so the tab can show an accurate empty-state message either way.
@@ -174,7 +174,7 @@ function ResultsTab({ coreApi, onGoToSetup, onEditJob, onCloneJob }) {
     jobList
       .filter(job => job.status !== 'draft' && !TERMINAL_STATES.includes(job.status))
       .forEach(job => {
-        api.get(`/abcfold/jobs/${job.id}/status`)
+        api.get(`/alphapulldown/jobs/${job.id}/status`)
           .then(res => setJobs(current => current.map(j => (j.id === job.id ? { ...j, status: res.data.state } : j))))
           .catch(() => {});
       });
@@ -182,7 +182,7 @@ function ResultsTab({ coreApi, onGoToSetup, onEditJob, onCloneJob }) {
 
   function loadJobs() {
     setLoading(true);
-    api.get('/abcfold/jobs')
+    api.get('/alphapulldown/jobs')
       .then(res => {
         setJobs(res.data);
         refreshJobsNeedingStatus(res.data);
@@ -199,7 +199,7 @@ function ResultsTab({ coreApi, onGoToSetup, onEditJob, onCloneJob }) {
   function refreshStatus(id) {
     setStatusLoading(true);
     setStatusError('');
-    api.get(`/abcfold/jobs/${id}/status`)
+    api.get(`/alphapulldown/jobs/${id}/status`)
       .then(res => {
         setStatusInfo(res.data);
         // The badge (and the polling stop-condition below) read
@@ -216,7 +216,7 @@ function ResultsTab({ coreApi, onGoToSetup, onEditJob, onCloneJob }) {
   function refreshFiles(id) {
     setFilesLoading(true);
     setFilesError('');
-    return api.get(`/abcfold/jobs/${id}/files`)
+    return api.get(`/alphapulldown/jobs/${id}/files`)
       .then(res => { setFiles(res.data); return res.data; })
       .catch(err => { setFilesError(err.response?.data?.message || err.message); return []; })
       .finally(() => setFilesLoading(false));
@@ -235,7 +235,7 @@ function ResultsTab({ coreApi, onGoToSetup, onEditJob, onCloneJob }) {
       setLoadingState(true);
       setErrorState('');
     }
-    api.get(`/abcfold/jobs/${id}/download`, { params: { file: filename }, responseType: 'text' })
+    api.get(`/alphapulldown/jobs/${id}/download`, { params: { file: filename }, responseType: 'text' })
       .then(res => {
         if (selectedIdRef.current !== id) return;
         setContent(typeof res.data === 'string' ? cleanLog(res.data) : '');
@@ -274,10 +274,10 @@ function ResultsTab({ coreApi, onGoToSetup, onEditJob, onCloneJob }) {
     }
     setReportLoading(true);
     setReportError('');
-    api.post(`/abcfold/jobs/${id}/report-ticket`)
+    api.post(`/alphapulldown/jobs/${id}/report-ticket`)
       .then(res => {
         if (selectedIdRef.current !== id) return;
-        setReportUrl(api.getUri({ url: `/abcfold/jobs/${id}/report/${res.data.ticket}/${res.data.entry}` }));
+        setReportUrl(api.getUri({ url: `/alphapulldown/jobs/${id}/report/${res.data.ticket}/${res.data.entry}` }));
       })
       .catch(err => {
         if (selectedIdRef.current !== id) return;
@@ -385,7 +385,7 @@ function ResultsTab({ coreApi, onGoToSetup, onEditJob, onCloneJob }) {
     setFiles([]);
     setReportUrl(null);
     setReportError('');
-    api.get(`/abcfold/jobs/${id}`)
+    api.get(`/alphapulldown/jobs/${id}`)
       .then(res => {
         setSelectedJob(res.data);
         if (res.data.slurm_job_id) {
@@ -398,7 +398,7 @@ function ResultsTab({ coreApi, onGoToSetup, onEditJob, onCloneJob }) {
   }
 
   // Reads a job's own job.json back (written by submitJobToSlurm() next to
-  // submit.sh/the input JSON - see abcfoldRoutes.js) via the same generic
+  // submit.sh/the input JSON - see alphapulldownRoutes.js) via the same generic
   // download route everything else in this tab already uses. Not gated on
   // slurm_job_id having ever been set - a job stuck in 'draft' because the
   // Slurm call itself failed can still have a real job.json on disk from
@@ -410,7 +410,7 @@ function ResultsTab({ coreApi, onGoToSetup, onEditJob, onCloneJob }) {
   // "this file doesn't exist") still rejects, so it surfaces through
   // paramsError below instead of being mistaken for "nothing to restore".
   function loadJobParams(id) {
-    return api.get(`/abcfold/jobs/${id}/download`, { params: { file: 'job.json' }, responseType: 'text' })
+    return api.get(`/alphapulldown/jobs/${id}/download`, { params: { file: 'job.json' }, responseType: 'text' })
       .then(res => {
         try {
           return { status: 'found', params: JSON.parse(res.data) };
@@ -468,7 +468,7 @@ function ResultsTab({ coreApi, onGoToSetup, onEditJob, onCloneJob }) {
         setReportUrl(null);
         setReportError('');
         tabPickedRef.current = false;
-        return api.post(`/abcfold/jobs/${id}/submit`, result.params);
+        return api.post(`/alphapulldown/jobs/${id}/submit`, result.params);
       })
       .then(res => {
         if (!res) return;
@@ -485,7 +485,7 @@ function ResultsTab({ coreApi, onGoToSetup, onEditJob, onCloneJob }) {
     setDeleting(true);
     setDeleteError('');
     const id = selectedJob.id;
-    api.delete(`/abcfold/jobs/${id}`)
+    api.delete(`/alphapulldown/jobs/${id}`)
       .then(() => { setSelectedJob(null); loadJobs(); })
       .catch(err => {
         setConfirmingDelete(false);
@@ -500,7 +500,7 @@ function ResultsTab({ coreApi, onGoToSetup, onEditJob, onCloneJob }) {
   }
 
   function downloadFile(filename) {
-    api.get(`/abcfold/jobs/${selectedJob.id}/download`, { params: { file: filename }, responseType: 'blob' })
+    api.get(`/alphapulldown/jobs/${selectedJob.id}/download`, { params: { file: filename }, responseType: 'blob' })
       .then(res => {
         const url = window.URL.createObjectURL(new Blob([res.data]));
         const a = document.createElement('a');

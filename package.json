@@ -1,8 +1,8 @@
 {
-  "name": "mff-module-abcfold",
+  "name": "mff-module-alphapulldown",
   "version": "0.1.0",
   "private": true,
-  "description": "MFF-core feature module for running ABCFold jobs.",
+  "description": "MFF-core feature module for running AlphaPulldown jobs.",
   "engines": {
     "node": ">=20.0.0"
   },

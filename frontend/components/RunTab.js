@@ -1,5 +1,5 @@
 // Run tab - collects one or more protein sequences and zero or more ligand
-// SMILES/CCD entries, plus model selection, and runs the job: POST /abcfold/jobs
+// SMILES/CCD entries, plus model selection, and runs the job: POST /alphapulldown/jobs
 // creates AND submits to Slurm in one request, no separate draft/submit steps.
 // Whatever's in the sbatch script preview box below - regenerated live as
 // fields change, or hand-edited - is exactly what gets sent and run; there's
@@ -75,23 +75,23 @@ function RunTab({ coreApi, onJobCreated, prefill, prefillStatus, editingJobId })
   // means no restore was attempted (an ordinary fresh Run tab), 'found'
   // means fields below were just populated from a real job.json, 'not_found'
   // means a Resubmit/Clone was requested but this job predates saved
-  // parameters (see ABCFoldTab.js's onEditJob/onCloneJob).
+  // parameters (see AlphaPulldownTab.js's onEditJob/onCloneJob).
   const [restoreBanner, setRestoreBanner] = useState(null);
 
   useEffect(() => {
-    api.get('/abcfold/settings').then(res => {
+    api.get('/alphapulldown/settings').then(res => {
       const s = res.data;
       setMmseqs2(!!s.default_mmseqs2);
       setTemplates(!!s.default_templates);
       if (s.workspace && !s.workspace.active) {
         setWorkspaceActive(false);
-        setSettingsWarning('Your workspace storage isn’t available, so ABCFold jobs can’t be created — check the Setup tab.');
+        setSettingsWarning('Your workspace storage isn’t available, so AlphaPulldown jobs can’t be created — check the Setup tab.');
       }
     }).catch(() => {});
   }, [api]);
 
-  // prefill: a job's own job.json (see abcfoldRoutes.js's JOB_PARAMS_FILENAME),
-  // handed down by ABCFoldTab.js after ResultsTab.js's Resubmit or Clone
+  // prefill: a job's own job.json (see alphapulldownRoutes.js's JOB_PARAMS_FILENAME),
+  // handed down by AlphaPulldownTab.js after ResultsTab.js's Resubmit or Clone
   // action loads it - restores every field below to that job's own values,
   // ready to edit before running again. Only runs when prefillStatus is
   // 'found' - 'not_found' (the job predates saved parameters) deliberately
@@ -99,7 +99,7 @@ function RunTab({ coreApi, onJobCreated, prefill, prefillStatus, editingJobId })
   // raises restoreBanner instead; null (an ordinary fresh Run tab, no
   // restore attempted at all) does nothing here. Keyed on prefillStatus/
   // prefill's own identity (a fresh pair every time Resubmit/Clone fires,
-  // see ResultsTab.js/ABCFoldTab.js), not on any one field of it, so it
+  // see ResultsTab.js/AlphaPulldownTab.js), not on any one field of it, so it
   // only re-applies when a genuinely new prefill request comes in - not on
   // every keystroke afterwards, which would stomp whatever's being typed.
   useEffect(() => {
@@ -154,7 +154,7 @@ function RunTab({ coreApi, onJobCreated, prefill, prefillStatus, editingJobId })
   }
 
   function refreshPreview() {
-    return api.post('/abcfold/jobs/preview', buildPayload())
+    return api.post('/alphapulldown/jobs/preview', buildPayload())
       .then(res => {
         setScriptPreview(res.data.sbatchScript);
         setInputJsonFilename(res.data.inputJsonFilename);
@@ -232,8 +232,8 @@ function RunTab({ coreApi, onJobCreated, prefill, prefillStatus, editingJobId })
     // POST /jobs, which creates its own new job/workDir regardless of
     // whether the fields on screen came from a clone's prefill.
     const request = editingJobId
-      ? api.post(`/abcfold/jobs/${editingJobId}/submit`, payload)
-      : api.post('/abcfold/jobs', payload);
+      ? api.post(`/alphapulldown/jobs/${editingJobId}/submit`, payload)
+      : api.post('/alphapulldown/jobs', payload);
 
     request
       .then(() => onJobCreated())
