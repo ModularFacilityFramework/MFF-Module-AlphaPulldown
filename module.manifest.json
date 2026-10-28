@@ -1,12 +1,13 @@
 {
   "id": "alphapulldown",
   "label": "AlphaPulldown",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "tablePrefix": "alphapulldown_",
   "mountPath": "/alphapulldown",
   "backendEntry": "backend/index.js",
   "frontendEntry": "frontend/index.js",
   "requires": [
-    "slurm"
+    "slurm",
+    "abcfold"
   ]
 }
