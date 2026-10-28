@@ -6,9 +6,10 @@
 const express = require('express');
 
 const KNOWN_PAGES = [
-  { key: 'setup', label: 'Setup' },
-  { key: 'run', label: 'Run' },
-  { key: 'results', label: 'Results' }
+  { key: 'sequences', label: 'Sequences' },
+  { key: 'msa', label: 'MSA (CPU)' },
+  { key: 'cofold', label: 'Co-folding (GPU)' },
+  { key: 'setup', label: 'Setup' }
 ];
 
 module.exports = function buildRouter(coreApi) {

@@ -1,37 +1,50 @@
-// Setup tab - sbatch/cluster and AlphaPulldown defaults, one row per user
-// (GET/PUT /alphapulldown/settings). Only ever touches core through the coreApi
-// prop - see docs/MFF-Core_module-core-api.md for the contract.
+// Setup tab - the caller's own AlphaPulldown environment and resource
+// settings, one row per user (GET/PUT /alphapulldown/settings). Only ever
+// touches core through the coreApi prop - see docs/MFF-Core_module-core-api.md
+// for the contract.
 import React, { useEffect, useState } from 'react';
 import styles from '../styles/SetupTab.module.css';
 
-const FIELDS = [
+// type 'number' values are sent as numbers; the backend validates every
+// field again (they end up inside generated sbatch scripts).
+const ENVIRONMENT_FIELDS = [
   { key: 'env_name', label: 'Environment name', type: 'text' },
-  { key: 'slurm_mail_type', label: 'Mail type (optional, e.g. END,FAIL)', type: 'text' },
   {
-    key: 'default_database_dir',
-    label: 'Local genetic database directory (for offline MSA generation, no internet needed)',
-    type: 'text'
-  }
-];
-
-// This module's own resource request - not looked up from anywhere, just
-// what an AlphaPulldown job actually needs to run (see backend/db/schema.sql's
-// alphapulldown_settings table comment). Partition is handled separately, as a
-// dropdown built from live cluster data when there is any (see the
-// Partition field below) - these three are always used as typed.
-const RESOURCE_FIELDS = [
-  { key: 'default_cpus_per_task', label: 'CPUs per task', type: 'number' },
-  { key: 'default_mem', label: 'Memory (e.g. 64G)', type: 'text' },
-  { key: 'default_time', label: 'Wall time (e.g. 24:00:00)', type: 'text' }
-];
-
-const CHECKBOXES = [
-  {
-    key: 'default_mmseqs2',
-    label: 'Use MMseqs2 (public ColabFold API - needs internet) instead of the local database above, by default'
+    key: 'data_dir',
+    label: 'AlphaPulldown database directory (--data_dir) - required before an MSA job can run',
+    type: 'text',
+    placeholder: '/absolute/path/to/databases'
   },
-  { key: 'default_templates', label: 'Use templates by default' }
+  { key: 'max_template_date', label: 'Template cut-off date (YYYY-MM-DD)', type: 'text' },
+  { key: 'slurm_mail_type', label: 'Mail type (optional, e.g. END,FAIL)', type: 'text' }
 ];
+
+const RESOURCE_FIELDS = [
+  { key: 'msa_partition', label: 'Partition (blank = cluster default)', type: 'text' },
+  { key: 'msa_cpus_per_task', label: 'CPUs per task', type: 'number' },
+  { key: 'msa_mem', label: 'Memory per task (e.g. 64G)', type: 'text' },
+  { key: 'msa_time', label: 'Wall time per task (e.g. 10:00:00)', type: 'text' },
+  { key: 'msa_array_throttle', label: 'MSA tasks running at once', type: 'number' }
+];
+
+const LIMIT_FIELDS = [
+  { key: 'cofold_max_parallel', label: 'Co-folding jobs in flight at once', type: 'number' },
+  { key: 'warn_max_complex_aa', label: 'Warn when a complex is longer than (aa)', type: 'number' }
+];
+
+function renderField(field, form, updateField) {
+  return (
+    <label key={field.key} className={styles.field}>
+      <span>{field.label}</span>
+      <input
+        type={field.type}
+        value={form[field.key] ?? ''}
+        placeholder={field.placeholder}
+        onChange={e => updateField(field.key, field.type === 'number' ? Number(e.target.value) : e.target.value)}
+      />
+    </label>
+  );
+}
 
 function SetupTab({ coreApi }) {
   const { api } = coreApi;
@@ -40,51 +53,13 @@ function SetupTab({ coreApi }) {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  // Once the user directly edits the preview textarea, the live-refresh
-  // effect below stops overwriting it - otherwise every keystroke in an
-  // unrelated field 400ms later would silently clobber a manual edit.
-  // "Reset to generated preview" is the explicit way back to live-synced.
-  const [previewEdited, setPreviewEdited] = useState(false);
 
   useEffect(() => {
     api.get('/alphapulldown/settings')
-      .then(res => {
-        const data = res.data;
-        // If the saved default_partition isn't one of the live cluster's
-        // real partitions at all, default the dropdown to a GPU-capable
-        // one instead of showing a stale/invalid selection - this only
-        // changes what's shown, not what's saved, until Save is clicked.
-        const partitions = data.partitions || [];
-        const gpuPartitions = partitions.filter(p => p.gpusPerNode > 0);
-        const isValid = partitions.some(p => p.name === data.default_partition);
-        const resolvedDefaultPartition = (!isValid && gpuPartitions.length > 0) ? gpuPartitions[0].name : data.default_partition;
-        setForm({ ...data, default_partition: resolvedDefaultPartition });
-      })
-      .catch(err => setError(err.message))
+      .then(res => setForm(res.data))
+      .catch(err => setError(err.response?.data?.error || err.message))
       .finally(() => setLoading(false));
   }, [api]);
-
-  function refreshPreview() {
-    return api.post('/alphapulldown/settings/preview', form)
-      .then(res => setForm(f => (f ? { ...f, sbatchPreview: res.data.sbatchPreview } : f)))
-      .catch(() => {});
-  }
-
-  // Live preview: regenerate the sbatch preview shortly after any editable
-  // field changes, without waiting for Save - POST /settings/preview builds
-  // the same response GET/PUT do, but never touches the database. Skipped
-  // entirely once the user has directly edited the preview textarea
-  // (previewEdited) - see its declaration above.
-  useEffect(() => {
-    if (!form || previewEdited) return undefined;
-    const timer = setTimeout(refreshPreview, 400);
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    api, previewEdited, form?.env_manager, form?.env_name, form?.slurm_mail_type,
-    form?.default_partition, form?.default_cpus_per_task, form?.default_mem, form?.default_time,
-    form?.default_mmseqs2, form?.default_database_dir, form?.default_templates
-  ]);
 
   function updateField(key, value) {
     setForm(f => ({ ...f, [key]: value }));
@@ -100,7 +75,7 @@ function SetupTab({ coreApi }) {
         setForm(res.data);
         setSaved(true);
       })
-      .catch(err => setError(err.response?.data?.message || err.message))
+      .catch(err => setError(err.response?.data?.error || err.message))
       .finally(() => setSaving(false));
   }
 
@@ -108,41 +83,25 @@ function SetupTab({ coreApi }) {
   if (!form) return <div className={styles.errorBanner}>{error || 'Failed to load settings'}</div>;
 
   const workspace = form.workspace || { active: false, path: null, reason: null };
-  // 'no_slurm_access': this specific user isn't registered as a Slurm user
-  // at all (checked against sacctmgr on the Slurm module's side) - a
-  // per-user permission fact, not the same thing as the module being down.
-  // 'unreachable': anything else (not installed, network error, timeout).
-  // Only affects the live partitions list below - it never blocks a job,
-  // since default_partition always provides a real value to fall back on.
-  const slurmMessage = form.slurmError === 'no_slurm_access'
-    ? "You don't have Slurm access - ask an administrator to register your account with Slurm."
-    : 'The Slurm module is not reachable right now.';
-  const slurmDetail = (form.slurmErrorStatus || form.slurmErrorMessage)
-    ? `status: ${form.slurmErrorStatus ?? 'none'}, error: ${form.slurmErrorMessage || 'none'}`
-    : null;
 
   return (
     <form className={styles.form} onSubmit={handleSubmit}>
-      <p className={styles.submissionNote}>
-        Partition/CPUs/memory/wall time below are this module&apos;s own resource request for an AlphaPulldown
-        job - real defaults, not something waiting on any external configuration. Partition is a dropdown
-        of this cluster&apos;s actual GPU partitions when that data is available, defaulting to one that
-        actually has GPUs; otherwise it&apos;s a plain field you can type into yourself. GRES scales with
-        the GPU count you choose in the Run tab. Account, email, and each job&apos;s output directory are
-        pulled automatically, from your core account and core-provisioned workspace.
+      <p className={styles.hint}>
+        These are your own defaults for the MSA (CPU) stage. Co-folding runs through the ABCFold module and
+        uses that module&apos;s own settings. Account, email and every project&apos;s files come from your
+        core account and core-provisioned workspace.
       </p>
-
-      {form.slurmError && (
-        <p className={styles.errorBanner}>
-          {slurmMessage}
-          {slurmDetail && <><br /><code>{slurmDetail}</code></>}
-        </p>
-      )}
 
       {!workspace.active && (
         <p className={styles.errorBanner}>
           Your workspace storage isn&apos;t available ({workspace.reason || 'unknown reason'}) — you
-          can&apos;t create or submit AlphaPulldown jobs until this is resolved. Contact an administrator.
+          can&apos;t write project files or run jobs until this is resolved. Contact an administrator.
+        </p>
+      )}
+      {!form.data_dir && (
+        <p className={styles.submissionNote}>
+          No database directory is set yet. The MSA stage will not run until you set one below
+          (or tick the MMseqs2 option, which does not use it).
         </p>
       )}
 
@@ -155,62 +114,27 @@ function SetupTab({ coreApi }) {
             <option value="conda">conda</option>
           </select>
         </label>
-        {FIELDS.map(field => (
-          <label key={field.key} className={styles.field}>
-            <span>{field.label}</span>
-            <input
-              type={field.type}
-              value={form[field.key] ?? ''}
-              onChange={e => updateField(field.key, field.type === 'number' ? Number(e.target.value) : e.target.value)}
-            />
-          </label>
-        ))}
+        {ENVIRONMENT_FIELDS.map(field => renderField(field, form, updateField))}
       </div>
-
-      <h4 className={styles.sectionTitle}>Resource request</h4>
-      <div className={styles.grid}>
-        <label className={styles.field}>
-          <span>Partition</span>
-          {form.partitions && form.partitions.length > 0 ? (
-            <select value={form.default_partition ?? ''} onChange={e => updateField('default_partition', e.target.value)}>
-              {form.partitions.map(p => (
-                <option key={p.name} value={p.name}>
-                  {p.name}{p.gpusPerNode > 0 ? ` (${p.gpusPerNode} GPUs/node)` : ''}
-                </option>
-              ))}
-            </select>
-          ) : (
-            <input
-              type="text"
-              value={form.default_partition ?? ''}
-              onChange={e => updateField('default_partition', e.target.value)}
-              placeholder={form.slurmError ? slurmMessage : ''}
-            />
-          )}
-        </label>
-        {RESOURCE_FIELDS.map(field => (
-          <label key={field.key} className={styles.field}>
-            <span>{field.label}</span>
-            <input
-              type={field.type}
-              value={form[field.key] ?? ''}
-              onChange={e => updateField(field.key, field.type === 'number' ? Number(e.target.value) : e.target.value)}
-            />
-          </label>
-        ))}
-      </div>
-
       <div className={styles.checkboxes}>
-        {CHECKBOXES.map(cb => (
-          <label key={cb.key} className={styles.checkboxField}>
-            <input
-              type="checkbox"
-              checked={!!form[cb.key]}
-              onChange={e => updateField(cb.key, e.target.checked)}
-            />
-            <span>{cb.label}</span>
-          </label>
-        ))}
+        <label className={styles.checkboxField}>
+          <input
+            type="checkbox"
+            checked={!!form.msa_use_mmseqs2}
+            onChange={e => updateField('msa_use_mmseqs2', e.target.checked ? 1 : 0)}
+          />
+          <span>Use MMseqs2 (public ColabFold API, needs internet from the compute nodes) instead of searching the database directory</span>
+        </label>
+      </div>
+
+      <h4 className={styles.sectionTitle}>MSA task resources (one protein per task)</h4>
+      <div className={styles.grid}>
+        {RESOURCE_FIELDS.map(field => renderField(field, form, updateField))}
+      </div>
+
+      <h4 className={styles.sectionTitle}>Limits</h4>
+      <div className={styles.grid}>
+        {LIMIT_FIELDS.map(field => renderField(field, form, updateField))}
       </div>
 
       <h4 className={styles.sectionTitle}>From your core account</h4>
@@ -240,31 +164,6 @@ function SetupTab({ coreApi }) {
       <button type="submit" className={styles.saveButton} disabled={saving}>
         {saving ? 'Saving...' : 'Save settings'}
       </button>
-
-      <h4 className={styles.sectionTitle}>sbatch script preview</h4>
-      <p className={styles.hint}>
-        Generated from these settings using a placeholder job (single protein sequence, AlphaFold3) -
-        actual jobs created in the Run tab will differ based on what you enter there. Editable - edit
-        it directly to try out changes; use Reset to go back to what these settings actually generate.
-      </p>
-      {previewEdited && (
-        <button
-          type="button"
-          className={styles.resetButton}
-          onClick={() => { setPreviewEdited(false); refreshPreview(); }}
-        >
-          Reset to generated preview
-        </button>
-      )}
-      <textarea
-        className={styles.scriptEditor}
-        value={form.sbatchPreview ?? ''}
-        onChange={e => {
-          setPreviewEdited(true);
-          setForm(f => ({ ...f, sbatchPreview: e.target.value }));
-        }}
-        spellCheck={false}
-      />
     </form>
   );
 }

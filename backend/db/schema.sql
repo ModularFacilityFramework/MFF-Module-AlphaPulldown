@@ -9,25 +9,22 @@
 -- Install/Update time - see backend/config/database.js's header comment for
 -- how this module reads it, and mff-core's own
 -- docs/MFF-Core_module-database-provisioning.md for how core provisions it.
+--
+-- Core's schema diffing only ever ADDS tables and columns: a column added
+-- later must be nullable or carry a DEFAULT, and a column's type is never
+-- changed after the fact. Tables for the MSA stage, the co-folding stage and
+-- the anonymised speed samples are added in the phases that build them.
 
--- One row per user, upserted from the Setup tab. Holds AlphaPulldown's OWN
--- resource request outright: default_partition/default_cpus_per_task/
--- default_mem/default_time are this module's own settings for what an
--- AlphaPulldown job actually needs to run (matching a real, known-working
--- reference script for this cluster - njp158's pyp1_abcfold.slurm), not
--- something dependent on an admin having configured anything on the
--- Slurm module's side. The GRES request is computed at job-creation time
--- from the requested GPU count (gpu:<count>), and the partition actually
--- used is cross-checked against backend/services/slurmClient.js's
--- listGpuPartitions() (live cluster detection, no admin config needed -
--- see docs/MFF-Module-SLURM_slurm-config.md), falling back to
--- default_partition only if that detection comes back empty. account/email
--- both come straight from coreApi at request time (req.user.username,
--- coreApi.listUsers() for email), and each job's output directory comes
--- from coreApi.getUserWorkspacePath(req.user) - neither is cached in this
--- module's own table. If that workspace isn't active for a user (see
--- alphapulldownRoutes.js's POST /jobs and /jobs/:id/submit), this module
--- refuses to create or submit jobs for them at all.
+-- One row per user, upserted from the Setup tab. Holds this module's OWN
+-- resource request for the CPU (MSA) stage and its AlphaPulldown environment
+-- settings. The co-folding stage runs through the ABCFold module, which has
+-- its own per-user settings - nothing about GPU jobs is stored here.
+-- account/email come straight from coreApi at request time (req.user.username,
+-- coreApi.listUsers()), and every output directory comes from
+-- coreApi.getUserWorkspacePath(req.user) - none of them is cached here.
+-- Every value below ends up inside a generated sbatch script, so
+-- backend/routes/settingsRoutes.js validates each one against a strict
+-- pattern before it is ever stored.
 CREATE TABLE IF NOT EXISTS alphapulldown_settings (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   owner_id BIGINT NOT NULL,
@@ -36,22 +33,28 @@ CREATE TABLE IF NOT EXISTS alphapulldown_settings (
   -- in the generated sbatch script. Not an ENUM: this file has no
   -- migrations, ever, and a free-form default is easier to extend later.
   env_manager VARCHAR(20) NOT NULL DEFAULT 'micromamba',
-  env_name VARCHAR(255) NOT NULL DEFAULT 'abcfold',
-  -- Matches a real, known-working reference script for this cluster
-  -- (njp158's pyp1_abcfold.slurm).
-  default_partition VARCHAR(100) NOT NULL DEFAULT 'gpu',
-  default_cpus_per_task INT NOT NULL DEFAULT 8,
-  default_mem VARCHAR(20) NOT NULL DEFAULT '64G',
-  default_time VARCHAR(20) NOT NULL DEFAULT '24:00:00',
-  -- Real local database on this cluster (full AlphaFold3 bundle:
-  -- uniref90/uniref30/bfd/mgnify/pdb70/pdb_seqres/pdb_mmcif/uniprot/
-  -- params) - an available alternative to --mmseqs2 below, not the
-  -- default; see alphapulldownRoutes.js's DEFAULT_SETTINGS for why.
-  default_database_dir VARCHAR(500) NOT NULL DEFAULT '/home/linuxhomes/software/genetic_db',
-  -- Matches njp158's own known-working reference script - real, proven
-  -- working on this cluster.
-  default_mmseqs2 TINYINT(1) NOT NULL DEFAULT 1,
-  default_templates TINYINT(1) NOT NULL DEFAULT 0,
+  env_name VARCHAR(255) NOT NULL DEFAULT 'alphapulldown',
+  -- AlphaFold database directory passed to create_individual_features.py as
+  -- --data_dir (jackhmmer/hhblits searches and templates). Empty until the
+  -- user sets it in Setup - the MSA stage refuses to run without it.
+  data_dir VARCHAR(500) NOT NULL DEFAULT '',
+  -- 1 = ask the public ColabFold MMseqs2 API for MSAs (needs internet from
+  -- the compute node) instead of searching data_dir.
+  msa_use_mmseqs2 TINYINT(1) NOT NULL DEFAULT 0,
+  max_template_date VARCHAR(10) NOT NULL DEFAULT '2050-01-01',
+  -- Resource request of ONE MSA array task (one protein).
+  -- Empty = omit --partition and let the cluster pick its default.
+  msa_partition VARCHAR(100) NOT NULL DEFAULT '',
+  msa_cpus_per_task INT NOT NULL DEFAULT 8,
+  msa_mem VARCHAR(20) NOT NULL DEFAULT '64G',
+  msa_time VARCHAR(20) NOT NULL DEFAULT '10:00:00',
+  -- How many array tasks / ABCFold jobs may be in flight at once (the %K of
+  -- --array=1-N%K, and the co-folding submission cap).
+  msa_array_throttle INT NOT NULL DEFAULT 20,
+  cofold_max_parallel INT NOT NULL DEFAULT 20,
+  -- A complex longer than this (residues) is flagged as unlikely to be
+  -- feasible. Defaults to AlphaPulldown's own length filter for AlphaFold2.
+  warn_max_complex_aa INT NOT NULL DEFAULT 5000,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uniq_owner_id (owner_id)
@@ -61,55 +64,44 @@ CREATE TABLE IF NOT EXISTS alphapulldown_settings (
   -- coreApi.authenticateToken) instead.
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- One row per created job draft. Structured columns for cheap list
--- rendering; the generated AF3 input JSON, abcfold CLI command, and sbatch
--- script are stored as full text snapshots. status starts 'draft' and, once
--- submitted (POST /jobs/:id/submit), tracks the Slurm module's own state
--- vocabulary verbatim (PENDING/RUNNING/COMPLETED/FAILED/CANCELLED/etc,
--- refreshed on every GET /jobs/:id/status poll) - see
--- backend/services/slurmClient.js.
-CREATE TABLE IF NOT EXISTS alphapulldown_jobs (
+-- A project owns one set of proteins and ties the three stages together
+-- (sequences -> MSA -> co-folding). project_number is per-owner sequential
+-- (1, 2, 3, ...), shown as "P<number>" and used to name the project's own
+-- folder under the user's workspace (module-AlphaPulldown/P<number>) - not
+-- the same as id, which is global across every user.
+CREATE TABLE IF NOT EXISTS alphapulldown_projects (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   owner_id BIGINT NOT NULL,
-  -- Per-owner sequential number (1, 2, 3, ...) - NOT the same as id, which
-  -- is global across every user. Shown to the user as "J<job_number>" and
-  -- used to name that job's own workDir under the user's workspace
-  -- (see alphapulldownRoutes.js's POST /jobs: MAX(job_number)+1 for this owner_id).
-  -- DEFAULT 0 exists only so mff-core's schema-diffing ADD COLUMN can add
-  -- this column to an already-populated table (it refuses a NOT NULL
-  -- column with no DEFAULT on a non-empty table, on purpose - see
-  -- docs/MFF-Core_module-database-provisioning.md's "Schema diffing"
-  -- section) - every row inserted through this module's own code always
-  -- supplies a real value explicitly, this default is never relied on
-  -- going forward. Pre-existing rows backfilled this way all read job_number=0
-  -- ("J0") until a real admin decides they're worth renumbering by hand -
-  -- schema diffing only adds columns, never backfills meaningful values.
-  job_number INT NOT NULL DEFAULT 0,
+  project_number INT NOT NULL,
   name VARCHAR(255) NOT NULL,
-  -- Free-form, not ENUM: this file has no migrations, ever, and the Slurm
-  -- module owns this vocabulary, not this module.
-  status VARCHAR(20) NOT NULL DEFAULT 'draft',
-  -- NULL until POST /jobs/:id/submit succeeds - the Slurm module's own job
-  -- identifier, needed for every status/files/download call after that.
-  slurm_job_id VARCHAR(100) NULL,
-  models_selected VARCHAR(100) NOT NULL,
-  -- This job's workDir - an absolute, on-disk path under the user's core
-  -- workspace (coreApi.getUserWorkspacePath). Not created until
-  -- POST /jobs/:id/submit actually writes submit.sh + the input JSON here
-  -- (a plain draft has no files on disk yet) and hands this same path to
-  -- the Slurm module, which requires it to already exist with those files
-  -- in place - the Slurm module never creates, writes into, or reads any
-  -- directory itself (docs/MFF-Module-SLURM_slurm-config.md). This module
-  -- also reads its own file listing/downloads straight back off this path,
-  -- since the Slurm module provides no route for that anymore either.
-  output_dir VARCHAR(500) NOT NULL,
-  input_json_filename VARCHAR(255) NOT NULL,
-  input_json LONGTEXT NOT NULL,
-  abcfold_command TEXT NOT NULL,
-  sbatch_script LONGTEXT NOT NULL,
+  -- 'pulldown' (baits x candidates), 'all_vs_all' or 'homo_oligomer'.
+  -- Free-form, not ENUM, for the same no-migrations reason as above.
+  mode VARCHAR(20) NOT NULL DEFAULT 'pulldown',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  KEY idx_owner_id (owner_id),
-  UNIQUE KEY uniq_owner_job_number (owner_id, job_number)
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_owner_project_number (owner_id, project_number)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- The proteins chosen for a project - only the selected ones, never a whole
+-- downloaded proteome (that stays a file in the user's workspace).
+-- role: 'bait' or 'candidate' for pulldown, 'all' for all_vs_all and
+-- homo_oligomer. name is the AlphaPulldown-safe identifier (it becomes the
+-- feature file name and the entry in the protein-list files).
+CREATE TABLE IF NOT EXISTS alphapulldown_project_sequences (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  project_id BIGINT NOT NULL,
+  role VARCHAR(20) NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  -- 'uniprot', 'proteome' or 'paste' - where the sequence came from.
+  source VARCHAR(20) NOT NULL DEFAULT 'paste',
+  description VARCHAR(500) NULL,
+  length INT NOT NULL,
+  sequence MEDIUMTEXT NOT NULL,
+  -- Copy number inside the complex (homo-oligomer state); 1 for a monomer.
+  copies INT NOT NULL DEFAULT 1,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_project_role_name (project_id, role, name),
+  KEY idx_project_id (project_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Which roles can see which of this module's tabs (Page Access tab, staff

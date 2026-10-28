@@ -3,9 +3,7 @@
    inside a registerDashboardTab tab, whose content wrapper already
    applies padding: 20px - no outer padding/background of this module's
    own on top of that (the Module UI Guide's own "What not to bring in"
-   section warns this doubles up visually), unlike the old
-   registerMenuPage page this used to be, which owned its outer padding
-   itself. */
+   section warns this doubles up visually). */
 
 .tabBar {
   display: flex;
@@ -36,4 +34,17 @@
 .loading {
   text-align: center;
   padding: 20px;
+}
+
+.empty {
+  padding: 20px;
+  color: #999;
+  font-style: italic;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
+.error {
+  color: #dc3545;
+  font-size: 13px;
 }

@@ -11,23 +11,10 @@
 // { ok: false, status, error } uniformly - so none of these wrappers need
 // try/catch either, they just check r.ok.
 
-// This used to collapse every failure (module not installed, network
-// error, and a 403 "you're not a registered Slurm user" - a real,
-// distinct, per-user rejection documented in
-// docs/MFF-Module-SLURM_slurm-config.md's "Access gate") into a bare []
-// - so the UI could only ever say "not reachable", even when the real
-// reason was "this specific person has no Slurm access", which has
-// nothing to do with reachability. Now it returns status/error too, so
-// callers (alphapulldownRoutes.js's getRequestContext) can tell those apart.
-//
-// No getResourceProfile()/GET /external/resource-profile here anymore -
-// that endpoint is admin-configured policy on the Slurm module's side,
-// keyed by GPU count, and there's no guarantee any admin ever populates
-// it. This module now owns its own resource request outright (partition
-// picked from this same gpu-partitions list, gres computed from the
-// requested GPU count, cpus/mem/time from this module's own settings -
-// see backend/routes/alphapulldownRoutes.js and backend/services/sbatchTemplateBuilder.js)
-// instead of depending on a policy table that may never exist.
+// Failures keep their status/error so callers can tell "this person is not a
+// registered Slurm user" (403, a per-user rejection documented in
+// docs/MFF-Module-SLURM_slurm-config.md's "Access gate") apart from "the
+// Slurm module is unreachable" - the two need different messages.
 async function listGpuPartitions(coreApi, token) {
   const r = await coreApi.callModule(token, 'slurm', 'GET', '/external/gpu-partitions');
   return r.ok ? { data: r.data, status: 200, error: null } : { data: [], status: r.status, error: r.error };
@@ -35,10 +22,9 @@ async function listGpuPartitions(coreApi, token) {
 
 // workDir must already exist on disk and already contain a submit.sh
 // script plus any input files the job needs, written there by the CALLER
-// (this module - see alphapulldownRoutes.js's POST /jobs/:id/submit) before this
-// is ever called. The Slurm module treats workDir as an opaque string,
-// passed straight to `sbatch --chdir` - it never creates, writes into, or
-// reads it itself (docs/MFF-Module-SLURM_slurm-config.md).
+// (this module) before this is ever called. The Slurm module treats workDir
+// as an opaque string, passed straight to `sbatch --chdir` - it never
+// creates, writes into, or reads it itself (docs/MFF-Module-SLURM_slurm-config.md).
 async function submitJob(coreApi, token, { workDir, jobName }) {
   const r = await coreApi.callModule(token, 'slurm', 'POST', '/external/jobs', {
     body: { workDir, jobName }
@@ -53,10 +39,9 @@ async function getJobStatus(coreApi, token, jobId) {
   return { success: true, ...r.data };
 }
 
-// No listJobFiles/downloadJobFile here anymore - the Slurm module provides
-// no file-listing/download routes at all (it never reads workDir's
-// contents, so it can't serve them back). Since this module is the one
-// that wrote workDir in the first place, it reads its own files straight
-// off disk itself - see alphapulldownRoutes.js's GET /jobs/:id/files[/:filename].
+// No listJobFiles/downloadJobFile here - the Slurm module provides no
+// file-listing/download routes at all (it never reads workDir's contents, so
+// it can't serve them back). This module wrote workDir in the first place,
+// so it reads its own files straight off disk itself.
 
 module.exports = { listGpuPartitions, submitJob, getJobStatus };

@@ -1,0 +1,79 @@
+/* Values from core's Module UI Guide: palette, 4px radii, 12-13px controls. */
+
+.bar {
+  margin-bottom: 16px;
+}
+
+.row,
+.createForm {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.createForm {
+  margin-top: 8px;
+}
+
+.label {
+  font-size: 13px;
+  color: #333;
+}
+
+.select,
+.nameInput {
+  padding: 6px 8px;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.nameInput {
+  min-width: 220px;
+}
+
+.chip {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  color: white;
+  background-color: #6c757d;
+}
+
+.newButton,
+.dangerButton,
+.neutralButton {
+  padding: 4px 10px;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.newButton {
+  background-color: #28a745;
+}
+
+.dangerButton {
+  background-color: #dc3545;
+}
+
+.neutralButton {
+  background-color: #6c757d;
+}
+
+.newButton:disabled,
+.dangerButton:disabled,
+.neutralButton:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.error {
+  color: #dc3545;
+  font-size: 13px;
+  margin: 8px 0 0;
+}

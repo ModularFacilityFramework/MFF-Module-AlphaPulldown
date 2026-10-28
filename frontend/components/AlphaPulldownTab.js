@@ -1,7 +1,7 @@
 // Top-level component registered via registerDashboardTab in ../index.js.
 // coreApi renders whatever gets registered as `<entry.component />` with
-// zero props and no routing - so Setup/Run/Results switching below is
-// plain React state, not real routes.
+// zero props and no routing - so tab switching below is plain React state,
+// not real routes.
 //
 // No page-level heading here on purpose: this already renders as a
 // labeled tab inside Dashboard's own tab bar (manifest.label, "AlphaPulldown"),
@@ -9,21 +9,28 @@
 // guide is explicit that a module shouldn't add a second title on top of
 // either.
 //
+// A project (ProjectBar) owns one set of proteins and ties the three
+// pipeline tabs together: Sequences -> MSA (CPU) -> Co-folding (GPU). The
+// stats strip under the tab bar always describes the selected project.
+//
 // Tab visibility is gated by GET /alphapulldown/page-access (see
 // backend/routes/pageAccessRoutes.js): staff (canManageUsers) always see
 // every tab plus the staff-only Page Access tab itself; everyone else only
 // sees tabs a role of theirs has been granted.
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
+import ProjectBar from './ProjectBar';
+import StatsStrip from './StatsStrip';
+import StagePlaceholder from './StagePlaceholder';
 import SetupTab from './SetupTab';
-import RunTab from './RunTab';
-import ResultsTab from './ResultsTab';
 import PageAccessTab from './PageAccessTab';
 import styles from '../styles/AlphaPulldownTab.module.css';
 
+// stage: a pipeline tab (needs a selected project, shows the stats strip).
 const TABS = [
-  { key: 'setup', label: 'Setup', component: SetupTab },
-  { key: 'run', label: 'Run', component: RunTab },
-  { key: 'results', label: 'Results', component: ResultsTab }
+  { key: 'sequences', label: 'Sequences', stage: 'sequences', component: StagePlaceholder },
+  { key: 'msa', label: 'MSA (CPU)', stage: 'msa', component: StagePlaceholder },
+  { key: 'cofold', label: 'Co-folding (GPU)', stage: 'cofold', component: StagePlaceholder },
+  { key: 'setup', label: 'Setup', component: SetupTab }
 ];
 
 function AlphaPulldownTab({ coreApi }) {
@@ -32,18 +39,10 @@ function AlphaPulldownTab({ coreApi }) {
   const { canManageUsers, roles: userRoles } = useRoles(userData);
   const [access, setAccess] = useState(null);
   const [activeTab, setActiveTab] = useState(null);
-  // Run tab prefill, and which job (if any) it's editing in place - see
-  // ResultsTab.js's Resubmit/Clone actions and RunTab.js's own prefill/
-  // editingJobId props. null editingJobId with a non-null prefill is
-  // Clone (pre-filled, but still creates a brand new job on submit).
-  // runPrefillStatus distinguishes a real restore ('found') from "asked to
-  // restore, but this job predates saved parameters" ('not_found') from
-  // "no restore was attempted at all, ordinary fresh Run tab" (null) - the
-  // three need different (or no) banners in RunTab.js, not the silence a
-  // bare nullable prefill value used to produce either way.
-  const [runPrefill, setRunPrefill] = useState(null);
-  const [runPrefillStatus, setRunPrefillStatus] = useState(null);
-  const [editingJobId, setEditingJobId] = useState(null);
+  const [projects, setProjects] = useState(null);
+  const [projectId, setProjectId] = useState(null);
+  const [stats, setStats] = useState(null);
+  const [loadError, setLoadError] = useState('');
 
   useEffect(() => {
     api.get('/alphapulldown/page-access')
@@ -51,7 +50,45 @@ function AlphaPulldownTab({ coreApi }) {
       .catch(() => setAccess({}));
   }, [api]);
 
-  if (access === null) return <div className={styles.loading}>Loading...</div>;
+  // Reloads the project list and keeps the current selection when it still
+  // exists, otherwise selects `preferId` (a just-created project) or the
+  // newest one.
+  const loadProjects = useCallback((preferId) => api.get('/alphapulldown/projects')
+    .then(res => {
+      setProjects(res.data);
+      setProjectId(prev => {
+        if (preferId && res.data.some(p => p.id === preferId)) return preferId;
+        if (prev && res.data.some(p => p.id === prev)) return prev;
+        return res.data.length > 0 ? res.data[0].id : null;
+      });
+    })
+    .catch(err => {
+      setLoadError(err.response?.data?.error || err.message);
+      setProjects([]);
+    }), [api]);
+
+  useEffect(() => { loadProjects(); }, [loadProjects]);
+
+  useEffect(() => {
+    if (!projectId) {
+      setStats(null);
+      return;
+    }
+    setStats(null);
+    api.get(`/alphapulldown/projects/${projectId}/stats`)
+      .then(res => setStats(res.data))
+      .catch(() => setStats(null));
+  }, [api, projectId]);
+
+  function handleCreate(name, mode) {
+    return api.post('/alphapulldown/projects', { name, mode }).then(res => loadProjects(res.data.id));
+  }
+
+  function handleDelete(id) {
+    return api.delete(`/alphapulldown/projects/${id}`).then(() => loadProjects());
+  }
+
+  if (access === null || projects === null) return <div className={styles.loading}>Loading...</div>;
 
   const visibleTabs = TABS.filter(
     tab => canManageUsers || (access[tab.key] || []).some(role => userRoles.includes(role))
@@ -62,52 +99,20 @@ function AlphaPulldownTab({ coreApi }) {
   if (!currentTab) return <div className={styles.loading}>You don&apos;t have access to any tab in this module.</div>;
 
   const ActiveComponent = currentTab.component;
-  // RunTab and ResultsTab are the two tabs that need extra props, all for
-  // the same reason: jumping to another tab is plain React state here, not
-  // routing. RunTab needs to land on Results after creating/resubmitting a
-  // job, plus whatever prefill/editingJobId Results handed it (if any).
-  // ResultsTab needs a way back to Setup (e.g. to adjust resource/
-  // environment settings), and a way to push a job's own parameters into
-  // Run tab state before switching there (Resubmit edits that same job in
-  // place, Clone always starts a new one - see RunTab.js's own handling of
-  // editingJobId).
-  let extraProps = {};
-  if (currentTab.key === 'run') {
-    extraProps = {
-      prefill: runPrefill,
-      prefillStatus: runPrefillStatus,
-      editingJobId,
-      onJobCreated: () => {
-        setRunPrefill(null);
-        setRunPrefillStatus(null);
-        setEditingJobId(null);
-        setActiveTab('results');
-      }
-    };
-  }
-  if (currentTab.key === 'results') {
-    extraProps = {
-      onGoToSetup: () => setActiveTab('setup'),
-      // result is loadJobParams()'s own { status, params? } shape (see
-      // ResultsTab.js) - passed straight through rather than unwrapped
-      // here, so RunTab.js can tell "found" and "not_found" apart itself.
-      onEditJob: (result, jobId) => {
-        setRunPrefill(result.status === 'found' ? result.params : null);
-        setRunPrefillStatus(result.status);
-        setEditingJobId(jobId);
-        setActiveTab('run');
-      },
-      onCloneJob: result => {
-        setRunPrefill(result.status === 'found' ? result.params : null);
-        setRunPrefillStatus(result.status);
-        setEditingJobId(null);
-        setActiveTab('run');
-      }
-    };
-  }
+  const currentProject = projects.find(p => p.id === projectId) || null;
+  const needsProject = !!currentTab.stage;
 
   return (
     <div>
+      <ProjectBar
+        projects={projects}
+        currentId={projectId}
+        onSelect={setProjectId}
+        onCreate={handleCreate}
+        onDelete={handleDelete}
+      />
+      {loadError && <p className={styles.error}>{loadError}</p>}
+
       <div className={styles.tabBar}>
         {visibleTabs.map(tab => (
           <button
@@ -122,7 +127,12 @@ function AlphaPulldownTab({ coreApi }) {
       </div>
 
       <div className={styles.content}>
-        <ActiveComponent coreApi={coreApi} {...extraProps} />
+        {needsProject && currentProject && <StatsStrip stats={stats} />}
+        {needsProject && !currentProject ? (
+          <div className={styles.empty}>Create a project above to begin.</div>
+        ) : (
+          <ActiveComponent coreApi={coreApi} stage={currentTab.stage} project={currentProject} />
+        )}
       </div>
     </div>
   );

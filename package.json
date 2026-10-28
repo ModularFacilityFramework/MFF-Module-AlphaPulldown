@@ -7,7 +7,8 @@
     "node": ">=20.0.0"
   },
   "scripts": {
-    "lint": "eslint backend frontend --ext .js"
+    "lint": "eslint backend frontend --ext .js",
+    "test": "node --test"
   },
   "dependencies": {
     "express": "^5.1.0",

@@ -2,7 +2,7 @@
 
 An [MFF-core](../mff-core) feature module for running AlphaPulldown jobs on a Slurm cluster. Users define their inputs in the UI; this module generates the job's input files and sbatch script, writes them into the user's core workspace, and submits the job to the Slurm module.
 
-> **Status: scaffold.** This module was bootstrapped from the ABCFold module and renamed (id, manifest, tables, routes, UI). The tool-specific parts - the `abcfold` CLI command builder, the AlphaFold3 input-JSON builder, the report viewer, and the `abcfold_command` column in `alphapulldown_jobs` - are still ABCFold's and have not been rewritten for AlphaPulldown yet.
+> **Status: in development.** The module is built in phases: (0) project shell, settings and statistics, done; (1) Sequences tab; (2) speed database and estimates; (3) MSA (CPU) tab; (4) Co-folding (GPU) tab through the ABCFold module. The three pipeline tabs currently show a "not built yet" notice.
 
 ## Quick start
 
