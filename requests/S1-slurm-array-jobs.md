@@ -4,6 +4,8 @@
 **To:** a session working in the **Slurm module repo** (`MFF-Module-SLURM`).
 **Priority:** needed for the AlphaPulldown MSA stage (there is a fallback, see below).
 
+**Current state:** the AlphaPulldown MSA tab ships with the fallback described at the end (one job, proteins in parallel inside it). It works against the documented API as it stands; an answer here would let it switch to an array for per-protein scheduling.
+
 ## Why
 
 AlphaPulldown's feature (MSA) stage is naturally a Slurm **job array**: one task per protein, `create_individual_features.py --seq_index=$SLURM_ARRAY_TASK_ID`. The AlphaPulldown module would write a `submit.sh` containing `#SBATCH --array=1-N%K` into a prepared `workDir` and submit it with `POST /external/jobs`, exactly as the docs describe.

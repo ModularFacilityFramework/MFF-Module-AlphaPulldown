@@ -2,7 +2,7 @@
 
 An [MFF-core](../mff-core) feature module for running AlphaPulldown jobs on a Slurm cluster. Users define their inputs in the UI; this module generates the job's input files and sbatch script, writes them into the user's core workspace, and submits the job to the Slurm module.
 
-> **Status: in development.** The module is built in phases: (0) project shell, settings and statistics, done; (1) Sequences tab (UniProt search, FASTA, proteome download and browsing, selection, AlphaPulldown files), done; (2) anonymised speed database and estimates in the stats strip, done (estimates read "no estimate yet" until the MSA and Co-folding tabs have recorded finished jobs); (3) MSA (CPU) tab; (4) Co-folding (GPU) tab through the ABCFold module. The MSA and Co-folding tabs currently show a "not built yet" notice.
+> **Status: in development.** The module is built in phases: (0) project shell, settings and statistics, done; (1) Sequences tab (UniProt search, FASTA, proteome download and browsing, selection, AlphaPulldown files), done; (2) anonymised speed database and estimates in the stats strip, done (estimates read "no estimate yet" until the MSA and Co-folding tabs have recorded finished jobs); (3) MSA (CPU) tab, done; (4) Co-folding (GPU) tab through the ABCFold module. The Co-folding tab currently shows a "not built yet" notice.
 
 ## Quick start
 
@@ -25,6 +25,12 @@ docs/                       # symlink to mff-core's own docs/ - a shared space c
                             # install/database-provisioning docs are core's own MFF-Core_*.md
                             # files in that shared folder, not duplicated here.
 ```
+
+## MSA stage
+
+The MSA (CPU) tab runs AlphaPulldown's `create_individual_features.py` for the project's distinct proteins. A run is **one Slurm job** (not a job array): its script searches `Proteins searched at once` proteins in parallel with `xargs -P` inside a single allocation, so it asks for that many times the per-protein CPUs and memory, and a time limit of the per-protein limit times the number of rounds. Setup holds those numbers, the environment and the database directory (or MMseqs2); nothing about the cluster is assumed. A job array would let Slurm place each protein separately, but the Slurm module's array handling is unconfirmed (`requests/S1-slurm-array-jobs.md`).
+
+Each run has its own folder, `module-AlphaPulldown/P<n>/msa/run-<id>/`, in the user's workspace: `submit.sh`, `run_one.sh`, `msa_input.fasta`, `msa_names.txt`, `msa_lengths.txt`, `timings.tsv`, and one log per protein in `logs/`. Feature files go to `P<n>/features/`, shared by every run of the project. A protein whose features already exist is skipped (unless "search again" is ticked), and failures are reported by name with their log. `timings.tsv` records index, length, seconds, exit code and status - no names - and is copied into the anonymised speed database the first time the run is seen finished.
 
 ## Speed estimates
 

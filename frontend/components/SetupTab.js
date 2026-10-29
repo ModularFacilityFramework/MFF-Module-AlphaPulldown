@@ -21,10 +21,10 @@ const ENVIRONMENT_FIELDS = [
 
 const RESOURCE_FIELDS = [
   { key: 'msa_partition', label: 'Partition (blank = cluster default)', type: 'text' },
-  { key: 'msa_cpus_per_task', label: 'CPUs per task', type: 'number' },
-  { key: 'msa_mem', label: 'Memory per task (e.g. 64G)', type: 'text' },
-  { key: 'msa_time', label: 'Wall time per task (e.g. 10:00:00)', type: 'text' },
-  { key: 'msa_array_throttle', label: 'MSA tasks running at once', type: 'number' }
+  { key: 'msa_cpus_per_task', label: 'CPUs per protein', type: 'number' },
+  { key: 'msa_mem', label: 'Memory per protein (e.g. 64G)', type: 'text' },
+  { key: 'msa_time', label: 'Wall time per protein (e.g. 10:00:00)', type: 'text' },
+  { key: 'msa_array_throttle', label: 'Proteins searched at once (one MSA job holds this many times the resources above)', type: 'number' }
 ];
 
 const LIMIT_FIELDS = [
@@ -127,7 +127,7 @@ function SetupTab({ coreApi }) {
         </label>
       </div>
 
-      <h4 className={styles.sectionTitle}>MSA task resources (one protein per task)</h4>
+      <h4 className={styles.sectionTitle}>MSA resources (per protein searched)</h4>
       <div className={styles.grid}>
         {RESOURCE_FIELDS.map(field => renderField(field, form, updateField))}
       </div>

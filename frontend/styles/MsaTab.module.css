@@ -1,0 +1,217 @@
+/* Values from core's Module UI Guide: palette, 4px radii, 11-14px text. */
+
+.panel {
+  background-color: #ffffff;
+  padding: 20px;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  margin-bottom: 20px;
+}
+
+.panelTitle {
+  margin: 0 0 12px;
+  font-size: 14px;
+  font-weight: normal;
+  color: #333;
+}
+
+.sectionTitle {
+  margin: 20px 0 8px;
+  font-size: 14px;
+  font-weight: normal;
+  color: #333;
+}
+
+.summary {
+  font-size: 14px;
+  color: #333;
+  margin: 0 0 10px;
+}
+
+.hint,
+.muted {
+  font-size: 13px;
+  color: #666;
+}
+
+.hint {
+  margin: 0 0 10px;
+}
+
+.warning {
+  font-size: 14px;
+  color: #856404;
+  background-color: #fff3cd;
+  border: 1px solid #ffc107;
+  border-radius: 4px;
+  padding: 10px 15px;
+  margin: 0 0 10px;
+}
+
+.errorText {
+  font-size: 13px;
+  color: #dc3545;
+}
+
+.failedText {
+  color: #dc3545;
+}
+
+.empty {
+  padding: 20px;
+  color: #999;
+  font-style: italic;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0;
+  font-size: 13px;
+}
+
+.checkboxField {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #333;
+}
+
+.select {
+  padding: 4px 8px;
+  font-size: 13px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.btnGreen,
+.btnBlue,
+.btnGray,
+.btnRed {
+  padding: 4px 10px;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.btnGreen { background-color: #28a745; }
+.btnBlue { background-color: #007bff; }
+.btnGray { background-color: #6c757d; }
+.btnRed { background-color: #dc3545; }
+
+.btnGreen:disabled,
+.btnBlue:disabled,
+.btnGray:disabled,
+.btnRed:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.scripts {
+  margin-top: 10px;
+  font-size: 13px;
+}
+
+.scriptName {
+  margin: 10px 0 4px;
+  font-family: monospace;
+  font-size: 12px;
+  color: #666;
+}
+
+.pre {
+  margin: 0;
+  padding: 10px;
+  background-color: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  font-size: 12px;
+  overflow-x: auto;
+}
+
+.runCard {
+  background-color: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  padding: 12px 15px;
+  margin-bottom: 10px;
+}
+
+.runHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.badge {
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  color: white;
+}
+
+.badgeGreen { background-color: #28a745; }
+.badgeRed { background-color: #dc3545; }
+.badgeBlue { background-color: #007bff; }
+.badgeGray { background-color: #6c757d; }
+
+.bar {
+  height: 8px;
+  margin: 10px 0 6px;
+  background-color: #e9ecef;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.barFill {
+  height: 100%;
+  background-color: #28a745;
+}
+
+.runMeta {
+  font-size: 12px;
+  color: #666;
+}
+
+.detail {
+  background-color: #ffffff;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  padding: 15px;
+  margin: -4px 0 10px;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+
+.table th,
+.table td {
+  padding: 6px 8px;
+  text-align: left;
+  border-bottom: 1px solid #dee2e6;
+}
+
+.numeric {
+  text-align: right !important;
+}
+
+.mono {
+  font-family: monospace;
+}

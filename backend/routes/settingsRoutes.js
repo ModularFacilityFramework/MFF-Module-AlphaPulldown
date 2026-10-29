@@ -20,7 +20,7 @@ const DEFAULT_SETTINGS = {
   msa_cpus_per_task: 8,
   msa_mem: '64G',
   msa_time: '10:00:00',
-  msa_array_throttle: 20,
+  msa_array_throttle: 4,
   cofold_max_parallel: 20,
   warn_max_complex_aa: 5000
 };

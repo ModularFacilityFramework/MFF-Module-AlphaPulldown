@@ -21,6 +21,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import ProjectBar from './ProjectBar';
 import StatsStrip from './StatsStrip';
 import StagePlaceholder from './StagePlaceholder';
+import MsaTab from './MsaTab';
 import SequencesTab from './SequencesTab';
 import SetupTab from './SetupTab';
 import PageAccessTab from './PageAccessTab';
@@ -29,7 +30,7 @@ import styles from '../styles/AlphaPulldownTab.module.css';
 // stage: a pipeline tab (needs a selected project, shows the stats strip).
 const TABS = [
   { key: 'sequences', label: 'Sequences', stage: 'sequences', component: SequencesTab },
-  { key: 'msa', label: 'MSA (CPU)', stage: 'msa', component: StagePlaceholder },
+  { key: 'msa', label: 'MSA (CPU)', stage: 'msa', component: MsaTab },
   { key: 'cofold', label: 'Co-folding (GPU)', stage: 'cofold', component: StagePlaceholder },
   { key: 'setup', label: 'Setup', component: SetupTab }
 ];

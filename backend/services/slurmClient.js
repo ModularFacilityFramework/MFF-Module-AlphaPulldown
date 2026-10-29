@@ -39,9 +39,18 @@ async function getJobStatus(coreApi, token, jobId) {
   return { success: true, ...r.data };
 }
 
+// A job that already finished answers 409 "Job already finished"; that is the
+// state the caller wanted, so it is reported as success with alreadyFinished.
+async function cancelJob(coreApi, token, jobId) {
+  const r = await coreApi.callModule(token, 'slurm', 'POST', `/external/jobs/${jobId}/cancel`);
+  if (r.ok) return { success: true };
+  if (r.status === 409) return { success: true, alreadyFinished: true };
+  return { success: false, error: r.error, status: r.status };
+}
+
 // No listJobFiles/downloadJobFile here - the Slurm module provides no
 // file-listing/download routes at all (it never reads workDir's contents, so
 // it can't serve them back). This module wrote workDir in the first place,
 // so it reads its own files straight off disk itself.
 
-module.exports = { listGpuPartitions, submitJob, getJobStatus };
+module.exports = { listGpuPartitions, submitJob, getJobStatus, cancelJob };

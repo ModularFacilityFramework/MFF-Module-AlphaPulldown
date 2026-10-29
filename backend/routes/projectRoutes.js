@@ -11,7 +11,7 @@ const { loadSamples } = require('../services/speedRecorder');
 const { msaProfile } = require('../services/speedProfiles');
 const { projectDir, isInside, MODULE_DIRNAME } = require('../services/projectPaths');
 const { findProject } = require('../services/projectAccess');
-const { DEFAULT_SETTINGS } = require('./settingsRoutes');
+const { loadSettings } = require('../services/settingsStore');
 
 module.exports = function buildRouter(coreApi) {
   const router = express.Router();
@@ -22,11 +22,10 @@ module.exports = function buildRouter(coreApi) {
   // not tied to a method or hardware yet (that choice is made in the
   // co-folding stage), so it learns from every fold sample.
   async function statsFor(conn, project, ownerId) {
-    const [rows, settingsRows] = await Promise.all([
+    const [rows, settings] = await Promise.all([
       conn.query('SELECT role, name, length, copies FROM alphapulldown_project_sequences WHERE project_id = ?', [project.id]),
-      conn.query('SELECT * FROM alphapulldown_settings WHERE owner_id = ?', [ownerId])
+      loadSettings(conn, ownerId)
     ]);
-    const settings = { ...DEFAULT_SETTINGS, ...(settingsRows[0] || {}) };
     const stats = computeStats(rows, { mode: project.mode, limitAA: settings.warn_max_complex_aa });
 
     const [msaSamples, foldSamples] = await Promise.all([loadSamples(conn, 'msa'), loadSamples(conn, 'fold')]);

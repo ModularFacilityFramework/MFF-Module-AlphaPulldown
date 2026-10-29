@@ -48,9 +48,10 @@ CREATE TABLE IF NOT EXISTS alphapulldown_settings (
   msa_cpus_per_task INT NOT NULL DEFAULT 8,
   msa_mem VARCHAR(20) NOT NULL DEFAULT '64G',
   msa_time VARCHAR(20) NOT NULL DEFAULT '10:00:00',
-  -- How many array tasks / ABCFold jobs may be in flight at once (the %K of
-  -- --array=1-N%K, and the co-folding submission cap).
-  msa_array_throttle INT NOT NULL DEFAULT 20,
+  -- How many proteins one MSA job searches at once (its single allocation
+  -- holds this many per-protein slots), and how many ABCFold jobs may be in
+  -- flight at once.
+  msa_array_throttle INT NOT NULL DEFAULT 4,
   cofold_max_parallel INT NOT NULL DEFAULT 20,
   -- A complex longer than this (residues) is flagged as unlikely to be
   -- feasible. Defaults to AlphaPulldown's own length filter for AlphaFold2.
@@ -101,6 +102,36 @@ CREATE TABLE IF NOT EXISTS alphapulldown_project_sequences (
   copies INT NOT NULL DEFAULT 1,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uniq_project_role_name (project_id, role, name),
+  KEY idx_project_id (project_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- One row per MSA run: a single Slurm job that searches the project's
+-- proteins (see backend/services/msaPlan.js). The run's own folder
+-- (run_dir, relative to the project folder) holds the scripts, the per-protein
+-- logs and timings.tsv; protein names live only there and in the project's
+-- own sequences, never in this table. method/hardware/cpus snapshot what was
+-- asked for so the run's speed samples stay correct if Setup changes later.
+-- speed_ingested_at is the private-side marker that this run's timings were
+-- already copied (anonymised) into alphapulldown_speed_samples.
+CREATE TABLE IF NOT EXISTS alphapulldown_msa_runs (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  project_id BIGINT NOT NULL,
+  owner_id BIGINT NOT NULL,
+  run_dir VARCHAR(255) NOT NULL,
+  slurm_job_id VARCHAR(40) NULL,
+  -- Slurm's own state words (PENDING, RUNNING, COMPLETED, ...); PREPARING
+  -- while the files are being written, before the job is submitted.
+  state VARCHAR(30) NOT NULL DEFAULT 'PREPARING',
+  total INT NOT NULL,
+  to_do INT NOT NULL,
+  parallel INT NOT NULL,
+  redo TINYINT(1) NOT NULL DEFAULT 0,
+  method VARCHAR(50) NOT NULL DEFAULT '',
+  hardware VARCHAR(100) NOT NULL DEFAULT '',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  started_at DATETIME NULL,
+  ended_at DATETIME NULL,
+  speed_ingested_at DATETIME NULL,
   KEY idx_project_id (project_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
