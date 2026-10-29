@@ -2,7 +2,7 @@
 
 An [MFF-core](../mff-core) feature module for running AlphaPulldown jobs on a Slurm cluster. Users define their inputs in the UI; this module generates the job's input files and sbatch script, writes them into the user's core workspace, and submits the job to the Slurm module.
 
-> **Status: in development.** The module is built in phases: (0) project shell, settings and statistics, done; (1) Sequences tab (UniProt search, FASTA, proteome download and browsing, selection, AlphaPulldown files), done; (2) speed database and estimates; (3) MSA (CPU) tab; (4) Co-folding (GPU) tab through the ABCFold module. The MSA and Co-folding tabs currently show a "not built yet" notice.
+> **Status: in development.** The module is built in phases: (0) project shell, settings and statistics, done; (1) Sequences tab (UniProt search, FASTA, proteome download and browsing, selection, AlphaPulldown files), done; (2) anonymised speed database and estimates in the stats strip, done (estimates read "no estimate yet" until the MSA and Co-folding tabs have recorded finished jobs); (3) MSA (CPU) tab; (4) Co-folding (GPU) tab through the ABCFold module. The MSA and Co-folding tabs currently show a "not built yet" notice.
 
 ## Quick start
 
@@ -25,6 +25,15 @@ docs/                       # symlink to mff-core's own docs/ - a shared space c
                             # install/database-provisioning docs are core's own MFF-Core_*.md
                             # files in that shared folder, not duplicated here.
 ```
+
+## Speed estimates
+
+Every finished MSA or co-folding job adds one anonymised row to `alphapulldown_speed_samples`: sizes in amino acids, a method label, a hardware label, run and queue seconds, an outcome and the day. No user, project, job, protein name, accession or sequence is stored, and there is no route that lets a client write to the table - only the module's own backend does, from jobs it observed. The stats strip turns those samples into a typical and a slow-case wall time and CPU/GPU-hours, with a confidence level:
+
+- fewer than 5 finished samples: no estimate, just how many have been recorded
+- 5 to 29: low confidence; 30 or more: good
+- confidence also drops to low when the estimate borrows samples from other hardware, or when many jobs are larger than anything measured (the figures are then shown as a minimum)
+- similar-sized jobs that failed or ran out of memory are reported as a warning
 
 ## Installing into a real mff-core checkout
 

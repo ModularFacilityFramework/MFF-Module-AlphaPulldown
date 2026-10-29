@@ -86,6 +86,22 @@ function describeComplexes(mode, rows) {
   };
 }
 
+// The same description for the MSA stage, whose jobs are the distinct
+// proteins (a protein listed twice is searched once; copies do not matter).
+function describeProteins(rows) {
+  const unique = new Map();
+  rows.forEach(r => { if (!unique.has(r.name)) unique.set(r.name, r.length); });
+  const lengths = [...unique.values()].sort((a, b) => a - b);
+  if (lengths.length === 0) return null;
+  return {
+    count: lengths.length,
+    min: lengths[0],
+    max: lengths[lengths.length - 1],
+    total: sum(lengths),
+    atMost: x => countLE(lengths, x)
+  };
+}
+
 // Smallest complex length m such that at least half the complexes (rounded
 // up) are <= m - the lower median, found by bisection on atMost().
 function medianLength(complexes) {
@@ -146,4 +162,4 @@ function rolesForMode(mode) {
   return mode === 'pulldown' ? ['bait', 'candidate'] : ['all'];
 }
 
-module.exports = { MODES, computeStats, rolesForMode };
+module.exports = { MODES, computeStats, rolesForMode, describeComplexes, describeProteins };

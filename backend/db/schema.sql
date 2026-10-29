@@ -12,8 +12,8 @@
 --
 -- Core's schema diffing only ever ADDS tables and columns: a column added
 -- later must be nullable or carry a DEFAULT, and a column's type is never
--- changed after the fact. Tables for the MSA stage, the co-folding stage and
--- the anonymised speed samples are added in the phases that build them.
+-- changed after the fact. Tables for the MSA stage and the co-folding stage
+-- are added in the phases that build them.
 
 -- One row per user, upserted from the Setup tab. Holds this module's OWN
 -- resource request for the CPU (MSA) stage and its AlphaPulldown environment
@@ -102,6 +102,38 @@ CREATE TABLE IF NOT EXISTS alphapulldown_project_sequences (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uniq_project_role_name (project_id, role, name),
   KEY idx_project_id (project_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Anonymised speed samples: how long one MSA search or one co-folding job
+-- took for a given size on given hardware. Shared by every user of this
+-- module and used to estimate future runs; each finished job adds one row.
+-- Deliberately holds NO owner, project, job, accession, protein name,
+-- sequence or timestamp finer than a day - only sizes, a method label, a
+-- hardware label, timings and an outcome. The link between a private job
+-- and the sample it produced lives only on the private side (a
+-- speed_ingested_at column on the job rows, added with the stages that
+-- create them), so a sample cannot be traced back to anyone. There is
+-- intentionally no route that lets a client write here: rows come only from
+-- backend/services/speedRecorder.js, from jobs this module itself observed.
+-- stage: 'msa' (one protein, len_b NULL) or 'fold' (one complex of one or two
+-- proteins, total_len = all chains together).
+-- method: short label of what was run (e.g. 'mmseqs2' or 'local' for the MSA
+-- stage); hardware: short label of where (e.g. 'partition/8cpu').
+CREATE TABLE IF NOT EXISTS alphapulldown_speed_samples (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  stage VARCHAR(10) NOT NULL,
+  len_a INT NOT NULL,
+  len_b INT NULL,
+  total_len INT NOT NULL,
+  method VARCHAR(50) NOT NULL DEFAULT '',
+  hardware VARCHAR(100) NOT NULL DEFAULT '',
+  -- 'ok', 'oom', 'timeout' or 'failed'. Only 'ok' rows give a duration;
+  -- the others are kept to flag sizes that tend not to finish.
+  outcome VARCHAR(10) NOT NULL DEFAULT 'ok',
+  run_seconds INT NOT NULL,
+  queue_seconds INT NULL,
+  sampled_on DATE NOT NULL,
+  KEY idx_stage_class (stage, method, hardware, total_len)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Which roles can see which of this module's tabs (Page Access tab, staff

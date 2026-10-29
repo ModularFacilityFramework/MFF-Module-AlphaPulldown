@@ -5,7 +5,10 @@
 const express = require('express');
 const fs = require('fs').promises;
 const path = require('path');
-const { MODES, computeStats } = require('../services/sequenceStats');
+const { MODES, computeStats, describeComplexes, describeProteins } = require('../services/sequenceStats');
+const { estimateRun } = require('../services/speedEstimator');
+const { loadSamples } = require('../services/speedRecorder');
+const { msaProfile } = require('../services/speedProfiles');
 const { projectDir, isInside, MODULE_DIRNAME } = require('../services/projectPaths');
 const { findProject } = require('../services/projectAccess');
 const { DEFAULT_SETTINGS } = require('./settingsRoutes');
@@ -13,13 +16,37 @@ const { DEFAULT_SETTINGS } = require('./settingsRoutes');
 module.exports = function buildRouter(coreApi) {
   const router = express.Router();
 
+  // The numbers for the stats strip: sizes, plus an estimate for each stage
+  // from the anonymised speed samples (see services/speedEstimator.js). The
+  // MSA estimate uses the caller's own Setup values; the co-folding one is
+  // not tied to a method or hardware yet (that choice is made in the
+  // co-folding stage), so it learns from every fold sample.
   async function statsFor(conn, project, ownerId) {
     const [rows, settingsRows] = await Promise.all([
       conn.query('SELECT role, name, length, copies FROM alphapulldown_project_sequences WHERE project_id = ?', [project.id]),
-      conn.query('SELECT warn_max_complex_aa FROM alphapulldown_settings WHERE owner_id = ?', [ownerId])
+      conn.query('SELECT * FROM alphapulldown_settings WHERE owner_id = ?', [ownerId])
     ]);
-    const limitAA = settingsRows[0] ? settingsRows[0].warn_max_complex_aa : DEFAULT_SETTINGS.warn_max_complex_aa;
-    return computeStats(rows, { mode: project.mode, limitAA });
+    const settings = { ...DEFAULT_SETTINGS, ...(settingsRows[0] || {}) };
+    const stats = computeStats(rows, { mode: project.mode, limitAA: settings.warn_max_complex_aa });
+
+    const [msaSamples, foldSamples] = await Promise.all([loadSamples(conn, 'msa'), loadSamples(conn, 'fold')]);
+    stats.estimates = {
+      msa: estimateRun({
+        samples: msaSamples,
+        profile: msaProfile(settings),
+        complexes: describeProteins(rows),
+        slots: settings.msa_array_throttle,
+        unitsPerJob: settings.msa_cpus_per_task
+      }),
+      fold: estimateRun({
+        samples: foldSamples,
+        profile: {},
+        complexes: describeComplexes(stats.mode, rows),
+        slots: settings.cofold_max_parallel,
+        unitsPerJob: 1
+      })
+    };
+    return stats;
   }
 
   // GET /api/alphapulldown/projects - the caller's own projects, newest first

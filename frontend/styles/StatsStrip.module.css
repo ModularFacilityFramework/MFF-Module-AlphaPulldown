@@ -36,6 +36,20 @@
   margin-top: 2px;
 }
 
+.estimateStrip {
+  margin-top: 10px;
+}
+
+.estimateStrip .tile {
+  background-color: #f8f9fa;
+}
+
+.sub {
+  font-size: 11px;
+  color: #999;
+  margin-top: 2px;
+}
+
 .hint {
   font-size: 14px;
   color: #666;

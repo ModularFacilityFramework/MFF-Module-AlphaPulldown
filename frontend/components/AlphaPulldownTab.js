@@ -136,7 +136,7 @@ function AlphaPulldownTab({ coreApi }) {
       </div>
 
       <div className={styles.content}>
-        {needsProject && currentProject && <StatsStrip stats={stats} />}
+        {needsProject && currentProject && <StatsStrip stats={stats} stage={currentTab.stage} />}
         {needsProject && !currentProject ? (
           <div className={styles.empty}>Create a project above to begin.</div>
         ) : (
