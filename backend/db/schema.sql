@@ -135,15 +135,71 @@ CREATE TABLE IF NOT EXISTS alphapulldown_msa_runs (
   KEY idx_project_id (project_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- One row per co-folding run: a batch of bait-candidate pairs, each folded by
+-- its own ABCFold job (through the ABCFold module, see
+-- backend/services/abcfoldClient.js). max_parallel snapshots how many of them
+-- may be in flight at once; the other columns snapshot the options asked for
+-- so the run's speed samples stay correct if the defaults change later.
+-- method/hardware are the labels the run's samples are filed under.
+CREATE TABLE IF NOT EXISTS alphapulldown_cofold_runs (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  project_id BIGINT NOT NULL,
+  owner_id BIGINT NOT NULL,
+  total INT NOT NULL,
+  max_parallel INT NOT NULL,
+  model_seeds INT NOT NULL DEFAULT 1,
+  -- 'default' (leave it to the ABCFold module's own setting), 'yes' or 'no'.
+  mmseqs2 VARCHAR(10) NOT NULL DEFAULT 'default',
+  templates TINYINT(1) NOT NULL DEFAULT 0,
+  gpu_count INT NOT NULL DEFAULT 1,
+  -- 1 = hand ABCFold the MSA file from the MSA stage where there is one.
+  reuse_msa TINYINT(1) NOT NULL DEFAULT 0,
+  method VARCHAR(50) NOT NULL DEFAULT '',
+  hardware VARCHAR(100) NOT NULL DEFAULT '',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  cancelled_at DATETIME NULL,
+  KEY idx_project_id (project_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- One row per pair of a co-folding run. bait_name/cand_name are the project's
+-- own protein names (cand_name is NULL for a homo-oligomer, which folds one
+-- protein alone); they live here and never in the speed samples. state is
+-- QUEUED (not submitted yet), SUBMITTING, SUBMIT_FAILED, or - once ABCFold's
+-- job exists - Slurm's own state words. abcfold_job_id/slurm_job_id are the
+-- ids the ABCFold module answered with. speed_ingested_at is the private-side
+-- marker that this pair's timings were copied (anonymised) into
+-- alphapulldown_speed_samples.
+CREATE TABLE IF NOT EXISTS alphapulldown_cofold_items (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  run_id BIGINT NOT NULL,
+  project_id BIGINT NOT NULL,
+  bait_name VARCHAR(255) NOT NULL,
+  cand_name VARCHAR(255) NULL,
+  len_a INT NOT NULL,
+  len_b INT NULL,
+  state VARCHAR(30) NOT NULL DEFAULT 'QUEUED',
+  attempts INT NOT NULL DEFAULT 0,
+  last_error VARCHAR(500) NULL,
+  abcfold_job_id VARCHAR(40) NULL,
+  slurm_job_id VARCHAR(40) NULL,
+  claimed_at DATETIME NULL,
+  checked_at DATETIME NULL,
+  slurm_submitted_at DATETIME NULL,
+  started_at DATETIME NULL,
+  ended_at DATETIME NULL,
+  speed_ingested_at DATETIME NULL,
+  KEY idx_run_state (run_id, state),
+  KEY idx_project_pair (project_id, bait_name, cand_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- Anonymised speed samples: how long one MSA search or one co-folding job
 -- took for a given size on given hardware. Shared by every user of this
 -- module and used to estimate future runs; each finished job adds one row.
 -- Deliberately holds NO owner, project, job, accession, protein name,
 -- sequence or timestamp finer than a day - only sizes, a method label, a
 -- hardware label, timings and an outcome. The link between a private job
--- and the sample it produced lives only on the private side (a
--- speed_ingested_at column on the job rows, added with the stages that
--- create them), so a sample cannot be traced back to anyone. There is
+-- and the sample it produced lives only on the private side (the
+-- speed_ingested_at column on the MSA run and co-folding item rows), so a sample cannot be traced back to anyone. There is
 -- intentionally no route that lets a client write here: rows come only from
 -- backend/services/speedRecorder.js, from jobs this module itself observed.
 -- stage: 'msa' (one protein, len_b NULL) or 'fold' (one complex of one or two

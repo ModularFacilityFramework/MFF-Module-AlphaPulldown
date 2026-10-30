@@ -9,6 +9,7 @@ const buildSettingsRouter = require('./routes/settingsRoutes');
 const buildProjectRouter = require('./routes/projectRoutes');
 const buildSequenceRouter = require('./routes/sequenceRoutes');
 const buildMsaRouter = require('./routes/msaRoutes');
+const buildCofoldRouter = require('./routes/cofoldRoutes');
 const buildPageAccessRouter = require('./routes/pageAccessRoutes');
 
 module.exports = function register(coreApi) {
@@ -21,6 +22,7 @@ module.exports = function register(coreApi) {
   router.use(buildProjectRouter(moduleApi));
   router.use(buildSequenceRouter(moduleApi));
   router.use(buildMsaRouter(moduleApi));
+  router.use(buildCofoldRouter(moduleApi));
   router.use(buildPageAccessRouter(moduleApi));
   return {
     router,

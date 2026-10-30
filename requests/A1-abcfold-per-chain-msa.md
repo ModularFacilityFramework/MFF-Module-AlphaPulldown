@@ -8,6 +8,10 @@
 
 AlphaPulldown pulls one bait against many candidates. Its MSA stage computes each protein's MSA once, as an A3M file in the user's workspace. The co-folding stage then creates one ABCFold job per bait-candidate pair through `coreApi.callModule(token, 'abcfold', 'POST', '/jobs', { body })`. Today ABCFold's job route only takes sequences, so ABCFold re-searches the bait's MSA for every pair. We want it to reuse the A3M we already have.
 
+## What the AlphaPulldown module sends today
+
+The Co-folding tab already adds `unpairedMsaPath` to a chain when the user ticks "hand over the MSAs" and the project has a regular file `<workspace>/module-AlphaPulldown/P<n>/features/<name>.a3m` for that protein (written by AlphaPulldown's MMseqs2 search, a ColabFold-format A3M of the protein alone; never a symlink or a folder). Proteins searched against local databases leave AlphaFold2-format files instead and get no path. The path is absolute. Until this request is done the ABCFold module is expected to ignore the field.
+
 ## What is needed
 
 Let the job-creation route (`POST /jobs`) and the resubmit route (`POST /jobs/:id/submit`) accept, on each protein entry in `sequences`, an optional field:

@@ -6,31 +6,19 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import LogViewer from './LogViewer';
 import { formatDuration } from './formatDuration';
+import { errorText, badgeClass as badgeClassFor, formatWhen } from './runUi';
 import styles from '../styles/MsaTab.module.css';
 
 const POLL_MS = 10000;
 const LOG_POLL_MS = 5000;
-const BAD_STATES = ['FAILED', 'TIMEOUT', 'OUT_OF_MEMORY', 'NODE_FAIL', 'BOOT_FAIL', 'DEADLINE'];
-
-function errorText(err) {
-  return err.response?.data?.error || err.message;
-}
 
 function badgeClass(state) {
-  const word = String(state).split(/[\s+]/)[0];
-  if (word === 'COMPLETED') return styles.badgeGreen;
-  if (BAD_STATES.includes(word)) return styles.badgeRed;
-  if (word === 'RUNNING' || word === 'COMPLETING') return styles.badgeBlue;
-  return styles.badgeGray;
+  return badgeClassFor(styles, state);
 }
 
 function formatGB(memMB) {
   const gb = memMB / 1024;
   return gb < 10 ? `${gb.toFixed(1)} GB` : `${Math.round(gb).toLocaleString()} GB`;
-}
-
-function formatWhen(value) {
-  return value ? new Date(value).toLocaleString() : '—';
 }
 
 function runSeconds(run) {
