@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "deny": [
+      "Edit(//home/linuxhomes/namlb/Documents/React/development/mff-core/**)",
+      "Write(//home/linuxhomes/namlb/Documents/React/development/mff-core/**)",
+      "Edit(//home/linuxhomes/namlb/Documents/React/development/MFF-Module-SLURM/**)",
+      "Write(//home/linuxhomes/namlb/Documents/React/development/MFF-Module-SLURM/**)",
+      "Edit(//home/linuxhomes/namlb/Documents/React/development/MFF-Module-Doppio/**)",
+      "Write(//home/linuxhomes/namlb/Documents/React/development/MFF-Module-Doppio/**)",
+      "Edit(//home/linuxhomes/namlb/Documents/React/development/MFF-Module-ABCFold/**)",
+      "Write(//home/linuxhomes/namlb/Documents/React/development/MFF-Module-ABCFold/**)",
+      "Edit(//home/linuxhomes/namlb/Documents/React/development/MFF-Module-CryoEM/**)",
+      "Write(//home/linuxhomes/namlb/Documents/React/development/MFF-Module-CryoEM/**)",
+      "Edit(//home/linuxhomes/namlb/Documents/React/development/MFF-Module-Desk/**)",
+      "Write(//home/linuxhomes/namlb/Documents/React/development/MFF-Module-Desk/**)",
+      "Edit(//home/linuxhomes/namlb/Documents/React/development/MFF-Module-Finance/**)",
+      "Write(//home/linuxhomes/namlb/Documents/React/development/MFF-Module-Finance/**)",
+      "Edit(//home/linuxhomes/namlb/Documents/React/development/MFF-Module-template/**)",
+      "Write(//home/linuxhomes/namlb/Documents/React/development/MFF-Module-template/**)",
+      "Edit(//home/linuxhomes/namlb/Documents/React/development/MFF-Module-Pandda2.inspect/**)",
+      "Write(//home/linuxhomes/namlb/Documents/React/development/MFF-Module-Pandda2.inspect/**)"
+    ]
+  },
+  "crossSessionInbound": "accept"
+}

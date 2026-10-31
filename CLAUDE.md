@@ -2,22 +2,30 @@
 
 This repo was cloned from MFF-Module-template to build a single MFF-core feature module. Read `docs/MFF-Core_module-core-api.md` before writing any code here.
 
-## Hard rules for working in this repo
+## General rules (same for every MFF session)
 
-- **This repo is the only thing you may read, edit, or reason about the internals of.** `coreApi` (`docs/MFF-Core_module-core-api.md`) is the entire surface area onto MFF-core. A capability you need that isn't in `coreApi` is a gap to flag or request — never a reason to open, read, or reach into a sibling `mff-core` checkout's files, even if one happens to be present on the same machine. (`docs/` itself is a deliberate exception: it's a symlink to `../mff-core/docs`, a shared documentation space core and every module link to — reading it is expected and fine. This rule is about mff-core's *code*, never a reason to `require()`/import it or reach into its non-docs internals.)
+- **This repo is the only thing you may read, edit, commit, or push.** Never clone, open, edit, commit, or push to any other repo in this workspace — not `mff-core`, not another `MFF-Module-*` — even if its checkout happens to be present on disk alongside this one. (`docs/` itself is a deliberate exception: it's a symlink to `../mff-core/docs`, a shared documentation space core and every module link to — reading it is expected and fine.)
+- **Need something from another repo? Send a message, don't touch its files.** Use cross-session messaging (SendMessage / ListAgents) to the owning session instead of touching its files yourself. No agent teams — collaboration between modules happens only through these direct cross-session messages.
+- **Always commit and push automatically.** As soon as a change in this repo is in a working state, stage it, commit it, and push it to `origin` right away — don't wait for a separate "commit this" / "push this" request.
+- Everything this module needs from `mff-core` goes through the documented `coreApi` contract (`docs/MFF-Core_module-core-api.md`). If something you need isn't there, send a message to the relevant agent/session to request that information or to request a new function be implemented in that core dependency — never a reason to import or reach into another repo's own code yourself.
+- Modules never import other modules directly — cross-module communication goes through `coreApi`/core, or a cross-session message to that module's own session.
+- Always read the relevant file before editing it.
+- Ask if unsure — do not assume.
+- **No `.env` files for the frontend, ever.** There is exactly one `.env` for the entire backend (`App_backend/.env`), owned and written by `mff-core` — including every module's own generated credentials. A module never creates, reads, or maintains an `.env` of its own; all backend config comes through `coreApi.getModuleConfig()`.
+
+## Shared module conventions (same for every module repo)
+
 - **Never add an import/require that escapes this repo's own root.** `.eslintrc.json` blocks `**/mff-core/**` outright — if that rule ever needs bypassing, that's a sign something belongs in `coreApi` instead, not a reason to disable the rule.
 - **Table names must carry `module.manifest.json`'s `tablePrefix`, no exceptions.** Checked nowhere automatically today — hold yourself to it.
-- **Modules never import other modules.** All cross-module communication goes through core. If this module needs to react to something another module does, that's a core-level feature request (extend `coreApi`, or a core-level event/hook), not something to hack around in either module directly.
-- **No local dev harness, and none gets added back.** This repo has no `dev/` folder and no `npm run dev` - real testing happens against a real mff-core checkout only. Never re-introduce a dev-only `.env` (or any dev-only config file) as part of bringing one back.
-- **Exactly one config mechanism for everything this module ever needs — database credentials, tokens, hostnames, anything else — no separate categories, no exceptions.** One call, `coreApi.getModuleConfig()`, returns all of it together in a single object (see `docs/MFF-Core_env-policy.md`, the authoritative statement of this rule, and `backend/config/database.js` for the real usage). This module holds no `.env` of any kind, ever, and never calls `dotenv.config()`/`dotenv.parse()` on a file of its own. Database credentials arrive in that same object automatically — `backend/db/schema.sql` existing is what triggers provisioning (`docs/MFF-Core_module-database-provisioning.md`), no manifest declaration needed. Anything else this module ever needs must be declared in `module.manifest.json`'s `config` array (`docs/MFF-Core_module-manifest.md`): `{ key, generate: "secret" }` for a value core can generate itself, `{ key, required: true, description }` for a fact only a human knows. `module.manifest.json` has no `config` array today because this module needs nothing beyond its own database credentials — add an entry the moment that changes, never a CLI/README step telling an admin to hand-edit a file.
-- **This repo has no install script, on purpose.** Installing means `git clone`-ing this repo directly to `App_frontend/src/core/<id>/` inside a real mff-core checkout (see `docs/MFF-Core_module-database-provisioning.md`) — a real checkout, never a copy or symlink of one. That's mff-core's own decision to make (its Modules admin page, or a plain `git clone`), not something this repo orchestrates.
-- **Always commit and push after changing any file tracked by git in this repo — don't wait to be asked.** This overrides Claude Code's normal default of only committing/pushing when explicitly told to. As soon as a change here is in a working state, stage it, commit it, and push it to `origin main` in the same turn — the point of a module repo like this one is that mff-core's Update button can pull it, so a change sitting uncommitted or unpushed isn't actually done.
-- **`module.manifest.json`'s `version` field is auto-bumped by a tracked pre-commit hook (`.githooks/pre-commit`) — never hand-edit it.** As of mff-core commit `93792e8`, core displays that field completely verbatim (no commit-count computation, no truncation on its side — see `docs/MFF-Core_module-manifest.md`), so this repo has to be the one keeping it meaningful. The hook sets the trailing segment to what `git rev-list --count HEAD` will be once the commit lands, keeping whatever major.minor prefix is already there, and re-stages the file so the bump rides inside the same commit. **One-time setup per fresh clone** (git never auto-enables a tracked `hooksPath`): `chmod +x .githooks/pre-commit && git config core.hooksPath .githooks`.
+- **No local dev harness, and none gets added back.** This repo has no `dev/` folder and no `npm run dev` - real testing happens against a real mff-core checkout only.
+- **This repo has no install script, on purpose.** Installing means `git clone`-ing this repo directly to `App_frontend/src/core/<id>/` inside a real mff-core checkout (see `docs/MFF-Core_module-database-provisioning.md`) — a real checkout, never a copy or symlink of one. That's mff-core's own decision to make, not something this repo orchestrates.
+- **`module.manifest.json`'s `version` field is auto-bumped by a tracked pre-commit hook (`.githooks/pre-commit`) — never hand-edit it.** One-time setup per fresh clone (git never auto-enables a tracked `hooksPath`): `chmod +x .githooks/pre-commit && git config core.hooksPath .githooks`.
+- No migrations, ever — `backend/db/schema.sql` is this module's single source of truth, edited directly.
 
-## Working rules inherited from MFF-core (keep following these here too)
+## Module-specific
 
-- One step at a time — wait for confirmation before proceeding to the next thing
-- Always read the relevant file before editing it
-- Ask if unsure — do not assume
-- Never fix a bug locally when it belongs in `coreApi`/core itself — that's a cross-repo change to flag explicitly, not something to route around here
-- No migrations, ever — `backend/db/schema.sql` is this module's single source of truth, edited directly
+- **This module:** `alphapulldown` (`module.manifest.json`), mounted at `/alphapulldown`, table prefix `alphapulldown_`.
+- **Depends on:** `slurm`, `abcfold` — message those modules' sessions for anything needed from them (e.g. SLURM job submission, ABCFold's external surface).
+- **Depended on by:** none currently.
+- **Docs:** no module-owned doc file exists in `own-docs/` yet; when one is needed, create it there and message `mff-core`'s session to add the matching symlink in its `docs/`.
+- `requests/` in this repo holds cross-repo feature requests addressed to SLURM, ABCFold, and mff-core — superseded by direct cross-session messaging now; treat new requests as messages, not new files in `requests/`.

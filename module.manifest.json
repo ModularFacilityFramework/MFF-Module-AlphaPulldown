@@ -1,7 +1,7 @@
 {
   "id": "alphapulldown",
   "label": "AlphaPulldown",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "tablePrefix": "alphapulldown_",
   "mountPath": "/alphapulldown",
   "backendEntry": "backend/index.js",
