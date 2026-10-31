@@ -68,10 +68,11 @@ async function recordSamples(conn, samples, day = new Date().toISOString().slice
   return rows.length;
 }
 
-// The rows the estimator learns from, in its own shape.
+// The rows the estimator learns from, in its own shape (the newest
+// LOAD_LIMIT of the stage; the statistics view also reads them).
 async function loadSamples(conn, stage) {
   const rows = await conn.query(
-    `SELECT method, hardware, total_len, run_seconds, outcome FROM alphapulldown_speed_samples
+    `SELECT method, hardware, total_len, run_seconds, queue_seconds, outcome FROM alphapulldown_speed_samples
      WHERE stage = ? ORDER BY id DESC LIMIT ?`,
     [stage, LOAD_LIMIT]
   );
@@ -80,6 +81,7 @@ async function loadSamples(conn, stage) {
     hardware: r.hardware,
     totalLen: Number(r.total_len),
     runSeconds: Number(r.run_seconds),
+    queueSeconds: r.queue_seconds === null ? null : Number(r.queue_seconds),
     outcome: r.outcome
   }));
 }

@@ -15,7 +15,7 @@
 //
 // Tab visibility is gated by GET /alphapulldown/page-access (see
 // backend/routes/pageAccessRoutes.js): staff (canManageUsers) always see
-// every tab plus the staff-only Page Access tab itself; everyone else only
+// every tab plus the staff-only Speed statistics and Page Access tabs; everyone else only
 // sees tabs a role of theirs has been granted.
 import React, { useCallback, useEffect, useState } from 'react';
 import ProjectBar from './ProjectBar';
@@ -24,6 +24,7 @@ import MsaTab from './MsaTab';
 import CofoldTab from './CofoldTab';
 import SequencesTab from './SequencesTab';
 import SetupTab from './SetupTab';
+import SpeedTab from './SpeedTab';
 import PageAccessTab from './PageAccessTab';
 import styles from '../styles/AlphaPulldownTab.module.css';
 
@@ -102,7 +103,10 @@ function AlphaPulldownTab({ coreApi }) {
   const visibleTabs = TABS.filter(
     tab => canManageUsers || (access[tab.key] || []).some(role => userRoles.includes(role))
   );
-  if (canManageUsers) visibleTabs.push({ key: 'page-access', label: 'Page Access', component: PageAccessTab });
+  if (canManageUsers) {
+    visibleTabs.push({ key: 'speed', label: 'Speed statistics', component: SpeedTab });
+    visibleTabs.push({ key: 'page-access', label: 'Page Access', component: PageAccessTab });
+  }
 
   const currentTab = visibleTabs.find(t => t.key === activeTab) || visibleTabs[0];
   if (!currentTab) return <div className={styles.loading}>You don&apos;t have access to any tab in this module.</div>;

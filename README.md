@@ -2,7 +2,7 @@
 
 An [MFF-core](../mff-core) feature module for running AlphaPulldown jobs on a Slurm cluster. Users define their inputs in the UI; this module generates the job's input files and sbatch script, writes them into the user's core workspace, and submits the job to the Slurm module.
 
-> **Status: in development.** The module is built in phases: (0) project shell, settings and statistics, done; (1) Sequences tab (UniProt search, FASTA, proteome download and browsing, selection, AlphaPulldown files), done; (2) anonymised speed database and estimates in the stats strip, done (estimates read "no estimate yet" until the MSA and Co-folding tabs have recorded finished jobs); (3) MSA (CPU) tab, done; (4) Co-folding (GPU) tab through the ABCFold module, done (it assumes the ABCFold module's API, which is not documented yet - see the Co-folding section); (5) staff speed-statistics view and polish, not built.
+> **Status: in development.** The module is built in phases: (0) project shell, settings and statistics, done; (1) Sequences tab (UniProt search, FASTA, proteome download and browsing, selection, AlphaPulldown files), done; (2) anonymised speed database and estimates in the stats strip, done (estimates read "no estimate yet" until the MSA and Co-folding tabs have recorded finished jobs); (3) MSA (CPU) tab, done; (4) Co-folding (GPU) tab through the ABCFold module, done (it assumes the ABCFold module's API, which is not documented yet - see the Co-folding section); (5) staff Speed statistics tab and polish, done.
 
 ## Quick start
 
@@ -52,6 +52,13 @@ Every finished MSA or co-folding job adds one anonymised row to `alphapulldown_s
 - 5 to 29: low confidence; 30 or more: good
 - confidence also drops to low when the estimate borrows samples from other hardware, or when many jobs are larger than anything measured (the figures are then shown as a minimum)
 - similar-sized jobs that failed or ran out of memory are reported as a warning
+- the MSA estimate uses the caller's Setup values; the co-folding estimate uses the options of the project's latest co-folding run, or pools every fold sample until the project has one (the strip says so). The Co-folding tab's plan estimates for the options being chosen.
+
+## Speed statistics (staff)
+
+Staff (the same roles as Page Access) get a **Speed statistics** tab that shows what the speed database holds: samples recorded in total and per stage (finished or not), samples per day for the last 30 days, and one row per class - a method on one kind of hardware, which is exactly what an estimate learns from. Each class shows its sample count, how many finished and how many did not (out of memory, timed out, failed), a confidence level (none under 5 finished samples, low under 30, good from 30 - the same thresholds as the stats strip), the typical and slow (90th percentile) run time, the median queue wait, and the sizes covered. A row opens into timings by size band. Labels read in words ("3 seeds, MMseqs2 server, templates"; "2 GPUs") with the raw label on hover.
+
+It is read-only: `GET /alphapulldown/speed/summary` is the only route, there is none that adds, edits or deletes a sample, and the response carries no names because the table holds none. Classes are built from the newest 20,000 samples per stage (the ones the estimator reads); when the table is bigger the tab says so. The tab is not a page-access key: it is for staff only.
 
 ## Installing into a real mff-core checkout
 

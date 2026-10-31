@@ -35,7 +35,7 @@ function formatHours(hours) {
 }
 
 // One row of estimate tiles, or a single "no estimate yet" tile, per stage.
-function buildEstimateRow(key, estimate) {
+function buildEstimateRow(key, estimate, foldBasis) {
   const { title, unit } = ESTIMATE_LABELS[key];
   if (estimate.reason === 'empty') return null;
   if (!estimate.available) {
@@ -44,7 +44,9 @@ function buildEstimateRow(key, estimate) {
       tiles: [{
         label: `${title}: no estimate yet`,
         value: `${estimate.samples} of ${estimate.needed}`,
-        hint: 'Finished jobs recorded so far. Every finished job adds its speed, and an estimate appears once enough are recorded.'
+        hint: key === 'fold' && foldBasis === 'last-run'
+          ? 'Finished jobs recorded so far with the options of this project\'s latest run. Every finished job adds its speed, and an estimate appears once enough are recorded.'
+          : 'Finished jobs recorded so far. Every finished job adds its speed, and an estimate appears once enough are recorded.'
       }],
       warnings: []
     };
@@ -61,6 +63,9 @@ function buildEstimateRow(key, estimate) {
   if (estimate.tier === 'method') {
     warnings.push(`${title}: based on runs on other hardware, so treat it as rough.`);
   }
+  if (key === 'fold' && foldBasis === 'all') {
+    warnings.push(`${title}: no co-folding run in this project yet, so this pools every option and hardware seen so far. The Co-folding tab estimates for the options you choose.`);
+  }
   return {
     key,
     tiles: [
@@ -68,7 +73,7 @@ function buildEstimateRow(key, estimate) {
         label: `${title} time`,
         value: `${min}${formatDuration(estimate.wallSeconds.typical)}`,
         sub: `slow case ${formatDuration(estimate.wallSeconds.slow)}`,
-        hint: `Wall-clock time with ${estimate.slots} jobs at once, not counting time waiting in the queue. Slow case: every job at its 90th-percentile duration.`
+        hint: `Wall-clock time with ${estimate.slots} jobs at once, not counting time waiting in the queue. Slow case: every job at its 90th-percentile duration.${key === 'fold' && foldBasis === 'last-run' ? ' Based on the options of this project\'s latest co-folding run.' : ''}`
       },
       {
         label: unit,
@@ -135,7 +140,7 @@ function StatsStrip({ stats, stage }) {
   if (!stats) return <div className={styles.loading}>Loading statistics...</div>;
 
   const estimateRows = (STAGE_ESTIMATES[stage] || [])
-    .map(key => buildEstimateRow(key, stats.estimates[key]))
+    .map(key => buildEstimateRow(key, stats.estimates[key], stats.estimates.foldBasis))
     .filter(Boolean);
 
   return (

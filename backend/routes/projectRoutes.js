@@ -18,14 +18,17 @@ module.exports = function buildRouter(coreApi) {
 
   // The numbers for the stats strip: sizes, plus an estimate for each stage
   // from the anonymised speed samples (see services/speedEstimator.js). The
-  // MSA estimate uses the caller's own Setup values; the co-folding one is
-  // not tied to a method or hardware yet (that choice is made in the
-  // co-folding stage), so it learns from every fold sample.
+  // MSA estimate uses the caller's own Setup values. The co-folding options
+  // are chosen per run in the co-folding stage, so the strip uses the labels
+  // of this project's latest run (estimates.foldBasis 'last-run'); a project
+  // that has not folded yet learns from every fold sample ('all').
   async function statsFor(conn, project, ownerId) {
-    const [rows, settings] = await Promise.all([
+    const [rows, settings, lastRun] = await Promise.all([
       conn.query('SELECT role, name, length, copies FROM alphapulldown_project_sequences WHERE project_id = ?', [project.id]),
-      loadSettings(conn, ownerId)
+      loadSettings(conn, ownerId),
+      conn.query('SELECT method, hardware, gpu_count FROM alphapulldown_cofold_runs WHERE project_id = ? ORDER BY id DESC LIMIT 1', [project.id])
     ]);
+    const foldProfile = lastRun.length > 0 && lastRun[0].method ? { method: lastRun[0].method, hardware: lastRun[0].hardware } : {};
     const stats = computeStats(rows, { mode: project.mode, limitAA: settings.warn_max_complex_aa });
 
     const [msaSamples, foldSamples] = await Promise.all([loadSamples(conn, 'msa'), loadSamples(conn, 'fold')]);
@@ -39,11 +42,12 @@ module.exports = function buildRouter(coreApi) {
       }),
       fold: estimateRun({
         samples: foldSamples,
-        profile: {},
+        profile: foldProfile,
         complexes: describeComplexes(stats.mode, rows),
         slots: settings.cofold_max_parallel,
-        unitsPerJob: 1
-      })
+        unitsPerJob: foldProfile.method ? lastRun[0].gpu_count : 1
+      }),
+      foldBasis: foldProfile.method ? 'last-run' : 'all'
     };
     return stats;
   }

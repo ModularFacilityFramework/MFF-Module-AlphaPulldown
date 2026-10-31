@@ -1,0 +1,203 @@
+/* Values from core's Module UI Guide: palette, 4px radii, 11-14px text. */
+
+.panel {
+  background-color: #ffffff;
+  padding: 20px;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  margin-bottom: 20px;
+}
+
+.panelTitle {
+  margin: 0 0 12px;
+  font-size: 14px;
+  font-weight: normal;
+  color: #333;
+}
+
+.hint,
+.muted {
+  font-size: 13px;
+  color: #666;
+}
+
+.hint {
+  margin: 0 0 10px;
+}
+
+.warning {
+  font-size: 14px;
+  color: #856404;
+  background-color: #fff3cd;
+  border: 1px solid #ffc107;
+  border-radius: 4px;
+  padding: 10px 15px;
+  margin: 0 0 10px;
+}
+
+.errorText {
+  font-size: 13px;
+  color: #dc3545;
+}
+
+.failedText {
+  color: #dc3545;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0;
+}
+
+.btnGray {
+  padding: 4px 10px;
+  color: white;
+  background-color: #6c757d;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.btnGray:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.tiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.tile {
+  min-width: 140px;
+  padding: 10px 14px;
+  background-color: #ffffff;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+}
+
+.tileValue {
+  font-size: 16px;
+  font-weight: bold;
+  color: #333;
+}
+
+.tileLabel {
+  font-size: 11px;
+  color: #666;
+  margin-top: 2px;
+}
+
+.tileSub {
+  font-size: 11px;
+  color: #999;
+  margin-top: 2px;
+}
+
+.activity {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 80px;
+}
+
+.activityDay {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  background-color: #f8f9fa;
+  border-radius: 2px;
+}
+
+.activityMsa {
+  background-color: #007bff;
+}
+
+.activityFold {
+  background-color: #28a745;
+}
+
+.legend {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: #666;
+}
+
+.swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin: 0 4px 0 12px;
+  border-radius: 2px;
+}
+
+.swatch:first-child {
+  margin-left: 0;
+}
+
+.scroll {
+  overflow-x: auto;
+}
+
+.table,
+.bandTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.table th,
+.table td,
+.bandTable th,
+.bandTable td {
+  padding: 6px 8px;
+  text-align: left;
+  border-bottom: 1px solid #dee2e6;
+}
+
+.numeric {
+  text-align: right !important;
+}
+
+.groupRow {
+  cursor: pointer;
+}
+
+.groupRow:hover {
+  background-color: #f8f9fa;
+}
+
+.toggle {
+  padding: 0 4px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: #666;
+}
+
+.bandCell {
+  background-color: #f8f9fa;
+}
+
+.bandTable {
+  margin-bottom: 8px;
+  background-color: #ffffff;
+}
+
+.badge {
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  color: white;
+}
+
+.levelGood { background-color: #28a745; }
+.levelLow { background-color: #ffc107; color: #333; }
+.levelNone { background-color: #6c757d; }
