@@ -18,7 +18,12 @@
       "Edit(//home/linuxhomes/namlb/Documents/React/development/MFF-Module-template/**)",
       "Write(//home/linuxhomes/namlb/Documents/React/development/MFF-Module-template/**)",
       "Edit(//home/linuxhomes/namlb/Documents/React/development/MFF-Module-Pandda2.inspect/**)",
-      "Write(//home/linuxhomes/namlb/Documents/React/development/MFF-Module-Pandda2.inspect/**)"
+      "Write(//home/linuxhomes/namlb/Documents/React/development/MFF-Module-Pandda2.inspect/**)",
+      "Edit(//home/linuxhomes/namlb/Documents/React/development/MFF-docs/**)",
+      "Write(//home/linuxhomes/namlb/Documents/React/development/MFF-docs/**)",
+      "NotebookEdit(//home/linuxhomes/namlb/Documents/React/development/MFF-docs/**)",
+      "Edit(//home/linuxhomes/namlb/Documents/React/development/MFF-core/**)",
+      "Write(//home/linuxhomes/namlb/Documents/React/development/MFF-core/**)"
     ]
   },
   "crossSessionInbound": "accept"
