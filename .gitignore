@@ -10,3 +10,8 @@ Thumbs.db
 coverage/
 *.tmp
 *.temp
+
+# Claude Code files - local to this machine, never committed
+CLAUDE.md
+CLAUDE.local.md
+.claude/
