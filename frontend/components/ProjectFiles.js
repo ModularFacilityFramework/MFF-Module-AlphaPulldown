@@ -1,6 +1,6 @@
 // The supporting files for AlphaPulldown, written into this project's folder
-// in the user's workspace: FASTA for the feature stage and the protein
-// lists run_multimer_jobs.py reads (baits.txt and candidates.txt for a pulldown). Written on demand, and again by the later stages; a file older than
+// in the user's workspace: FASTA for the feature (MSA) stage and protein
+// lists. Written on demand, and again by the later stages; a file older than
 // the last change to the selection is flagged as out of date.
 import React, { useCallback, useEffect, useState } from 'react';
 import styles from '../styles/SequencesTab.module.css';
@@ -51,7 +51,7 @@ function ProjectFiles({ api, project, refreshKey }) {
     <div className={styles.panel}>
       <h4 className={styles.panelTitle}>Files for AlphaPulldown</h4>
       <p className={styles.hint}>
-        FASTA files for create_individual_features.py and the protein lists run_multimer_jobs.py reads, written to your workspace. The Features and Prediction tabs write what they need themselves; these are for running AlphaPulldown by hand. FASTA headers hold only the protein
+        FASTA files for the MSA stage and protein lists, written to your workspace. FASTA headers hold only the protein
         name, because AlphaPulldown names each protein&apos;s feature file after the header. Lists have one protein per
         line; a copy number above 1 is written as <span className={styles.mono}>name:2</span>.
       </p>

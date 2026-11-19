@@ -1,10 +1,10 @@
 // The numbers a user needs to judge whether a project is feasible: how many
-// proteins, how many complexes would be predicted, how many amino acids, how
+// proteins, how many complexes would be folded, how many amino acids, how
 // big the complexes get. Rendered from GET /projects/:id/stats (computed in
 // backend/services/sequenceStats.js), together with the time and CPU/GPU-hour
 // estimates the backend derives from its anonymised speed samples
 // (backend/services/speedEstimator.js). The Sequences tab shows both stage
-// estimates, the Features and Prediction tabs only their own.
+// estimates, the MSA and Co-folding tabs only their own.
 import React from 'react';
 import { formatDuration } from './formatDuration';
 import styles from '../styles/StatsStrip.module.css';
@@ -19,8 +19,8 @@ const STAGE_ESTIMATES = {
   cofold: ['fold']
 };
 const ESTIMATE_LABELS = {
-  msa: { title: 'Feature search', unit: 'CPU-hours' },
-  fold: { title: 'AlphaFold 3 prediction', unit: 'GPU-hours' }
+  msa: { title: 'MSA search', unit: 'CPU-hours' },
+  fold: { title: 'Co-folding', unit: 'GPU-hours' }
 };
 const FAILED_SHARE_WARNING = 0.1;
 
@@ -64,7 +64,7 @@ function buildEstimateRow(key, estimate, foldBasis) {
     warnings.push(`${title}: based on runs on other hardware, so treat it as rough.`);
   }
   if (key === 'fold' && foldBasis === 'all') {
-    warnings.push(`${title}: no prediction run in this project yet, so this pools every option and hardware seen so far. The Prediction tab estimates for the options you choose.`);
+    warnings.push(`${title}: no co-folding run in this project yet, so this pools every option and hardware seen so far. The Co-folding tab estimates for the options you choose.`);
   }
   return {
     key,
@@ -73,7 +73,7 @@ function buildEstimateRow(key, estimate, foldBasis) {
         label: `${title} time`,
         value: `${min}${formatDuration(estimate.wallSeconds.typical)}`,
         sub: `slow case ${formatDuration(estimate.wallSeconds.slow)}`,
-        hint: `Wall-clock time with ${estimate.slots} jobs at once, not counting time waiting in the queue. Slow case: every job at its 90th-percentile duration.${key === 'fold' && foldBasis === 'last-run' ? ' Based on the options of this project\'s latest prediction run.' : ''}`
+        hint: `Wall-clock time with ${estimate.slots} jobs at once, not counting time waiting in the queue. Slow case: every job at its 90th-percentile duration.${key === 'fold' && foldBasis === 'last-run' ? ' Based on the options of this project\'s latest co-folding run.' : ''}`
       },
       {
         label: unit,

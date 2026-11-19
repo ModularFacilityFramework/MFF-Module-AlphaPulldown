@@ -10,40 +10,23 @@ const PULLDOWN = [
 ];
 const OPTIONS = plan.normaliseOptions({}).options;
 
-const SETTINGS = {
-  slurm_mail_type: 'END,FAIL',
-  env_manager: 'micromamba',
-  env_name: 'alphafold3_alphapulldown',
-  weights_dir: '/models/af3',
-  fold_partition: 'gpu',
-  fold_gres: 'gpu:1',
-  fold_cpus_per_task: 8,
-  fold_mem: '64G',
-  fold_time: '24:00:00',
-  fold_unified_memory: 1
-};
-const PATHS = { featuresDir: '/ws/P1/features', outputDir: '/ws/P1/predictions/run-3/job-9/output', cacheDir: '/ws/P1/predictions/jax-cache' };
-
-test('options default to AlphaFold 3\'s own and every bad value is named', () => {
+test('options default sensibly and every bad value is named', () => {
   assert.deepStrictEqual(
-    [OPTIONS.seeds, OPTIONS.samples, OPTIONS.recycles, OPTIONS.includeOversize, OPTIONS.limit, OPTIONS.baits],
-    [1, 5, 10, false, null, null]
+    [OPTIONS.seeds, OPTIONS.gpuCount, OPTIONS.mmseqs2, OPTIONS.templates, OPTIONS.reuseMsa, OPTIONS.limit, OPTIONS.baits],
+    [1, 1, 'default', false, false, null, null]
   );
   assert.strictEqual(plan.normaliseOptions({ seeds: 0 }).errors.length, 1);
   assert.strictEqual(plan.normaliseOptions({ seeds: 21 }).errors.length, 1);
-  assert.strictEqual(plan.normaliseOptions({ samples: 21 }).errors.length, 1);
-  assert.strictEqual(plan.normaliseOptions({ recycles: 0 }).errors.length, 1);
-  assert.strictEqual(plan.normaliseOptions({ recycles: '3' }).options.recycles, 3);
+  assert.strictEqual(plan.normaliseOptions({ gpuCount: 9 }).errors.length, 1);
+  assert.strictEqual(plan.normaliseOptions({ mmseqs2: 'maybe' }).errors.length, 1);
   assert.strictEqual(plan.normaliseOptions({ limit: 0 }).errors.length, 1);
   assert.strictEqual(plan.normaliseOptions({ baits: 'B1' }).errors.length, 1);
   assert.deepStrictEqual(plan.normaliseOptions({ seeds: 3, baits: ['B1'], limit: '5' }).options.baits, ['B1']);
 });
 
 test('the profile labels are valid sample labels and differ when the work differs', () => {
-  const a = plan.foldProfile(OPTIONS, SETTINGS);
-  const b = plan.foldProfile({ ...OPTIONS, seeds: 5, samples: 1, recycles: 3 }, { ...SETTINGS, fold_gres: 'gpu:rtx_a5000:1' });
-  assert.deepStrictEqual(a, { method: 'af3-s1-d5-r10', hardware: 'gpu/gpu-1' });
-  assert.strictEqual(b.hardware, 'gpu/gpu-rtx_a5000-1');
+  const a = plan.foldProfile(OPTIONS);
+  const b = plan.foldProfile({ ...OPTIONS, seeds: 5, templates: true, reuseMsa: true, mmseqs2: 'yes', gpuCount: 2 });
   assert.notDeepStrictEqual(a, b);
   [a, b].forEach(p => assert.ok(sanitiseSample({ stage: 'fold', lenA: 10, lenB: 10, outcome: 'ok', runSeconds: 1, ...p }, '2026-01-01'), JSON.stringify(p)));
 });
@@ -59,12 +42,11 @@ test('a pulldown lists every bait with every candidate, copies counted in the le
   assert.strictEqual(plan.countSelection('pulldown', PULLDOWN, ['nope']), 0);
 });
 
-test('all-vs-all lists unordered pairs, a protein with itself included; a homo-oligomer folds each alone', () => {
+test('all-vs-all lists unordered pairs of different proteins; a homo-oligomer folds each alone', () => {
   const all = [row('all', 'X', 10), row('all', 'Y', 20), row('all', 'Z', 30, 3)];
   const pairs = [...plan.enumeratePairs('all_vs_all', all, null)];
-  assert.deepStrictEqual(pairs.map(p => `${p.bait.name}${p.cand.name}`), ['XX', 'XY', 'XZ', 'YY', 'YZ', 'ZZ']);
-  assert.strictEqual(plan.countSelection('all_vs_all', all, null), 6);
-  assert.deepStrictEqual([pairs[5].lenA, pairs[5].lenB], [90, 90]);
+  assert.deepStrictEqual(pairs.map(p => `${p.bait.name}${p.cand.name}`), ['XY', 'XZ', 'YZ']);
+  assert.strictEqual(plan.countSelection('all_vs_all', all, null), 3);
   const homo = [...plan.enumeratePairs('homo_oligomer', all, null)];
   assert.deepStrictEqual(homo.map(p => [p.bait.name, p.cand, p.lenA, p.lenB]), [['X', null, 10, null], ['Y', null, 20, null], ['Z', null, 90, null]]);
   assert.strictEqual(plan.countSelection('homo_oligomer', all, null), 3);
@@ -102,57 +84,32 @@ test('a selection beyond one run is reported, not silently cut', () => {
   assert.strictEqual(sel.pairs.length, plan.MAX_PAIRS_PER_RUN);
 });
 
-test('a complex is written the way AlphaPulldown reads a protein list', () => {
-  const [, , , fourth] = [...plan.enumeratePairs('pulldown', PULLDOWN, null)]; // B2 (2 copies) with C1
-  assert.strictEqual(plan.foldSpec(fourth), 'B2:2+C1');
-  assert.strictEqual(plan.foldSpec([...plan.enumeratePairs('pulldown', PULLDOWN, null)][0]), 'B1+C1');
-  const homo = [...plan.enumeratePairs('homo_oligomer', [row('all', 'Z', 30, 3)], null)][0];
-  assert.strictEqual(plan.foldSpec(homo), 'Z:3');
+test('chain ids run A..Z then AA', () => {
+  assert.deepStrictEqual([0, 1, 25, 26, 27, 51, 52].map(plan.chainId), ['A', 'B', 'Z', 'AA', 'AB', 'AZ', 'BA']);
 });
 
-test('the run_multimer_jobs.py call: custom list, AlphaFold 3 backend, seeds, samples, recycles', () => {
-  const args = plan.foldArgs(SETTINGS, { seeds: 3, samples: 2, recycles: 7 }, PATHS);
-  assert.deepStrictEqual(args, [
-    '--mode=custom',
-    '--protein_lists=fold_input.txt',
-    '--monomer_objects_dir=\'/ws/P1/features\'',
-    '--output_path=\'/ws/P1/predictions/run-3/job-9/output\'',
-    '--data_dir=\'/models/af3\'',
-    '--fold_backend=alphafold3',
-    '--num_seeds=3',
-    '--num_diffusion_samples=2',
-    '--num_cycle=7',
-    '--jax_compilation_cache_dir=\'/ws/P1/predictions/jax-cache\''
-  ]);
+test('the ABCFold body: one chain per copy, seeds, options, and a safe name', () => {
+  const pair = [...plan.enumeratePairs('pulldown', PULLDOWN, null)][3]; // B2 (2 copies) with C1
+  const body = plan.buildJobBody({ projectNumber: 7, pair, options: { ...OPTIONS, seeds: 3, templates: true, gpuCount: 2, mmseqs2: 'yes' } });
+  assert.strictEqual(body.name, 'ap-P7-B2-C1');
+  assert.deepStrictEqual(body.sequences.map(s => s.id), ['A', 'B', 'C']);
+  assert.deepStrictEqual(body.sequences.map(s => s.sequence.length), [200, 200, 50]);
+  assert.deepStrictEqual(body.modelSeeds, [1, 2, 3]);
+  assert.deepStrictEqual([body.models, body.templates, body.gpuCount, body.mmseqs2], [['alphafold3'], true, 2, true]);
+  assert.ok(body.sequences.every(s => s.unpairedMsaPath === undefined));
+  assert.ok(!('mmseqs2' in plan.buildJobBody({ projectNumber: 7, pair, options: OPTIONS })), 'default leaves it to the ABCFold module');
+  assert.strictEqual(plan.buildJobBody({ projectNumber: 7, pair, options: { ...OPTIONS, mmseqs2: 'no' } }).mmseqs2, false);
+  const weird = { bait: { name: 'a b/c', copies: 1, sequence: 'M' }, cand: null };
+  assert.match(plan.jobName(1, weird), /^[A-Za-z0-9_.-]+$/);
 });
 
-test('the job folder holds the one-line list and an sbatch script that activates, then runs', () => {
+test('MSA reuse passes a path only for a protein that has one, and only when asked', () => {
   const pair = [...plan.enumeratePairs('pulldown', PULLDOWN, null)][3];
-  const files = plan.buildFoldFiles({ slug: 'ap-P1-fold-9', settings: SETTINGS, email: 'a@b.c', options: OPTIONS, pair, ...PATHS });
-  assert.deepStrictEqual(Object.keys(files), ['submit.sh', 'fold_input.txt']);
-  assert.strictEqual(files['fold_input.txt'], 'B2:2+C1\n');
-  const lines = files['submit.sh'].split('\n');
-  assert.strictEqual(lines[0], '#!/bin/bash -i');
-  ['#SBATCH --job-name=ap-P1-fold-9', '#SBATCH --partition=gpu', '#SBATCH --gres=gpu:1', '#SBATCH --cpus-per-task=8',
-    '#SBATCH --mem=64G', '#SBATCH --time=24:00:00', '#SBATCH --output=slurm.out', '#SBATCH --error=slurm.err',
-    '#SBATCH --mail-user=a@b.c', '#SBATCH --mail-type=END,FAIL'].forEach(l => assert.ok(lines.includes(l), l));
-  const at = text => lines.findIndex(l => l.includes(text));
-  assert.ok(at('micromamba activate alphafold3_alphapulldown') > 0);
-  assert.ok(at('set -euo pipefail') > at('micromamba activate'), 'strict mode only after the environment is active');
-  assert.ok(at('run_multimer_jobs.py') > at('set -euo pipefail'));
-  assert.ok(files['submit.sh'].includes('export TF_FORCE_UNIFIED_MEMORY=true'));
-  assert.ok(files['submit.sh'].includes('  --fold_backend=alphafold3 \\\n'));
-  assert.ok(!files['submit.sh'].endsWith(' \\\n'), 'the last argument carries no line continuation');
-});
-
-test('the script follows the settings: no GPU line, no mail, conda, no unified memory', () => {
-  const pair = [...plan.enumeratePairs('pulldown', PULLDOWN, null)][0];
-  const text = plan.buildFoldFiles({
-    slug: 's', settings: { ...SETTINGS, fold_gres: '', fold_partition: '', env_manager: 'conda', fold_unified_memory: 0 },
-    email: '', options: OPTIONS, pair, ...PATHS
-  })['submit.sh'];
-  assert.ok(!text.includes('--gres') && !text.includes('--partition') && !text.includes('--mail') && !text.includes('UNIFIED'));
-  assert.ok(text.includes('conda activate alphafold3_alphapulldown'));
+  const paths = { B2: '/ws/features/B2.a3m' };
+  const off = plan.buildJobBody({ projectNumber: 1, pair, options: OPTIONS, msaPathFor: n => paths[n] || null });
+  assert.ok(off.sequences.every(s => s.unpairedMsaPath === undefined));
+  const on = plan.buildJobBody({ projectNumber: 1, pair, options: { ...OPTIONS, reuseMsa: true }, msaPathFor: n => paths[n] || null });
+  assert.deepStrictEqual(on.sequences.map(s => s.unpairedMsaPath), ['/ws/features/B2.a3m', '/ws/features/B2.a3m', undefined]);
 });
 
 test('states fall into the progress groups and the finished ones are known', () => {

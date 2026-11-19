@@ -61,19 +61,16 @@ test('the list of groups is capped and the rest counted', () => {
 });
 
 test('labels read in words, and an unknown label is shown as it is', () => {
-  assert.deepStrictEqual(describeLabels('fold', 'af3-s3-d5-r10', 'gpu/gpu-2'), {
-    methodText: 'AlphaFold 3: 3 seeds, 5 diffusion samples, 10 recycles', hardwareText: '2 GPUs, partition gpu'
+  assert.deepStrictEqual(describeLabels('fold', 's3-mmseqs2-tpl-reuse', 'gpu2'), {
+    methodText: '3 seeds, MMseqs2 server, templates, MSAs from the MSA tab', hardwareText: '2 GPUs'
   });
-  assert.deepStrictEqual(describeLabels('fold', 'af3-s1-d1-r1', 'a+b/gpu-rtx_a5000-1'), {
-    methodText: 'AlphaFold 3: 1 seed, 1 diffusion sample, 1 recycle', hardwareText: '1 GPU (rtx_a5000), partition a or b'
+  assert.deepStrictEqual(describeLabels('fold', 's1-localdb', 'gpu1'), {
+    methodText: '1 seed, local database, no templates', hardwareText: '1 GPU'
   });
-  assert.deepStrictEqual(describeLabels('msa', 'af3', 'cpu_a+cpu_b/8cpu'), {
-    methodText: 'AlphaFold 3 feature search (local databases)', hardwareText: '8 CPUs, partition cpu_a or cpu_b'
+  assert.deepStrictEqual(describeLabels('msa', 'mmseqs2', 'cpu_a+cpu_b/8cpu'), {
+    methodText: 'MMseqs2 server search', hardwareText: '8 CPUs, partition cpu_a or cpu_b'
   });
-  // samples recorded before the module ran AlphaPulldown itself keep their old wording
-  assert.strictEqual(describeLabels('msa', 'mmseqs2', 'default/8cpu').methodText, 'MMseqs2 server search');
   assert.strictEqual(describeLabels('msa', 'local', 'default/4cpu').hardwareText, '4 CPUs, default partition');
-  assert.deepStrictEqual(describeLabels('fold', 's1-localdb', 'gpu1'), { methodText: 's1-localdb', hardwareText: 'gpu1' });
   assert.deepStrictEqual(describeLabels('fold', 'af3', ''), { methodText: 'af3', hardwareText: 'not recorded' });
 });
 

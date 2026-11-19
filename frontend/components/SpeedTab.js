@@ -7,7 +7,7 @@ import { formatDuration } from './formatDuration';
 import { errorText } from './runUi';
 import styles from '../styles/SpeedTab.module.css';
 
-const STAGE_TITLES = { msa: 'Feature search (CPU)', fold: 'AlphaFold 3 prediction (GPU)' };
+const STAGE_TITLES = { msa: 'MSA search (CPU)', fold: 'Co-folding (GPU)' };
 const LEVEL_TEXT = {
   none: { text: 'No estimate', className: 'levelNone', hint: 'Fewer than 5 finished samples: the stats strip gives no estimate for this class.' },
   low: { text: 'Low', className: 'levelLow', hint: '5 to 29 finished samples.' },
@@ -67,7 +67,7 @@ function Activity({ activity }) {
             <div
               key={d.day}
               className={styles.activityDay}
-              title={`${d.day}: ${d.msa} feature searches, ${d.fold} predictions`}
+              title={`${d.day}: ${d.msa} MSA, ${d.fold} co-folding`}
             >
               <div className={styles.activityFold} style={{ height: `${(d.fold / peak) * 100}%` }} />
               <div className={styles.activityMsa} style={{ height: `${(d.msa / peak) * 100}%` }} />
@@ -76,8 +76,8 @@ function Activity({ activity }) {
         </div>
       )}
       <p className={styles.legend}>
-        <span className={`${styles.swatch} ${styles.activityMsa}`} /> Feature search
-        <span className={`${styles.swatch} ${styles.activityFold}`} /> Prediction
+        <span className={`${styles.swatch} ${styles.activityMsa}`} /> MSA
+        <span className={`${styles.swatch} ${styles.activityFold}`} /> Co-folding
       </p>
     </div>
   );
@@ -142,7 +142,7 @@ function GroupRow({ group, open, onToggle }) {
           <td colSpan={10} className={styles.bandCell}>
             <Bands bands={group.bands} />
             <p className={styles.muted}>
-              Times are for finished jobs only. Queue time is the median wait before a job started (blank for feature runs, which are timed per protein).
+              Times are for finished jobs only. Queue time is the median wait before a job started (blank for MSA runs, which are timed per protein).
             </p>
           </td>
         </tr>
@@ -158,7 +158,7 @@ function StageTable({ stage, groups }) {
     <div className={styles.panel}>
       <h4 className={styles.panelTitle}>{STAGE_TITLES[stage]}</h4>
       {groups.length === 0 ? (
-        <p className={styles.muted}>No samples yet. Each finished {stage === 'msa' ? 'feature search' : 'prediction'} adds one.</p>
+        <p className={styles.muted}>No samples yet. Each finished {stage === 'msa' ? 'MSA run' : 'co-folding pair'} adds one.</p>
       ) : (
         <div className={styles.scroll}>
           <table className={styles.table}>
@@ -216,7 +216,7 @@ function SpeedTab({ coreApi }) {
   return (
     <div>
       <p className={styles.hint}>
-        Every finished feature search and prediction adds one anonymous sample: sizes, a method label, a hardware label, how long it took and how it ended.
+        Every finished MSA run and co-folding pair adds one anonymous sample: sizes, a method label, a hardware label, how long it took and how it ended.
         No user, project, protein name or sequence is stored. These samples drive every estimate in the stats strip.
       </p>
       <div className={styles.controls}>

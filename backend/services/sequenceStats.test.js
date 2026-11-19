@@ -34,18 +34,17 @@ test('pulldown with only baits has no pairs yet', () => {
   assert.strictEqual(s.complexLength, null);
 });
 
-test('all_vs_all: unordered pairs, a protein with itself included', () => {
-  // pair lengths: 200 (AA), 300 (AB), 400 (AC), 400 (BB), 500 (BC), 600 (CC)
+test('all_vs_all: unordered pairs of different proteins', () => {
+  // pair lengths: 300, 400, 500
   const rows = [row('all', 'A', 100), row('all', 'B', 200), row('all', 'C', 300)];
   const s = computeStats(rows, { mode: 'all_vs_all', limitAA: 350 });
-  assert.strictEqual(s.pairs, 6);
-  assert.deepStrictEqual(s.complexLength, { min: 200, median: 400, max: 600, total: 2400 });
-  assert.strictEqual(s.overLimit, 4);
+  assert.strictEqual(s.pairs, 3);
+  assert.deepStrictEqual(s.complexLength, { min: 300, median: 400, max: 500, total: 1200 });
+  assert.strictEqual(s.overLimit, 2);
 });
 
-test('all_vs_all with one protein is that protein with itself; with none, nothing', () => {
-  assert.strictEqual(computeStats([row('all', 'A', 100)], { mode: 'all_vs_all' }).pairs, 1);
-  assert.strictEqual(computeStats([], { mode: 'all_vs_all' }).pairs, 0);
+test('all_vs_all needs two proteins', () => {
+  assert.strictEqual(computeStats([row('all', 'A', 100)], { mode: 'all_vs_all' }).pairs, 0);
 });
 
 test('homo_oligomer: one complex per protein, length scaled by copies', () => {

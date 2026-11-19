@@ -12,16 +12,13 @@
 --
 -- Core's schema diffing only ever ADDS tables and columns: a column added
 -- later must be nullable or carry a DEFAULT, and a column's type is never
--- changed after the fact. A column removed from this file therefore stays
--- behind, unused, in a database that already has it; the code never reads one.
+-- changed after the fact. Tables for the MSA stage and the co-folding stage
+-- are added in the phases that build them.
 
 -- One row per user, upserted from the Setup tab. Holds this module's OWN
--- resource requests for both AlphaPulldown stages - the CPU feature stage
--- (create_individual_features.py) and the GPU prediction stage
--- (run_multimer_jobs.py) - and the AlphaPulldown environment they run in.
--- The defaults describe this cluster's installation (AlphaPulldown 2.9 with
--- AlphaFold 3 in the micromamba environment "alphafold3_alphapulldown"); every
--- one of them can be changed per user in Setup.
+-- resource request for the CPU (MSA) stage and its AlphaPulldown environment
+-- settings. The co-folding stage runs through the ABCFold module, which has
+-- its own per-user settings - nothing about GPU jobs is stored here.
 -- account/email come straight from coreApi at request time (req.user.username,
 -- coreApi.listUsers()), and every output directory comes from
 -- coreApi.getUserWorkspacePath(req.user) - none of them is cached here.
@@ -33,48 +30,31 @@ CREATE TABLE IF NOT EXISTS alphapulldown_settings (
   owner_id BIGINT NOT NULL,
   slurm_mail_type VARCHAR(50) NOT NULL DEFAULT 'BEGIN,END,FAIL',
   -- 'micromamba' or 'conda' - which environment manager activates env_name
-  -- in the generated sbatch scripts. Not an ENUM: this file has no
+  -- in the generated sbatch script. Not an ENUM: this file has no
   -- migrations, ever, and a free-form default is easier to extend later.
   env_manager VARCHAR(20) NOT NULL DEFAULT 'micromamba',
-  -- The environment that has AlphaPulldown installed (create_individual_features.py,
-  -- run_multimer_jobs.py on the PATH) together with AlphaFold 3.
-  env_name VARCHAR(255) NOT NULL DEFAULT 'alphafold3_alphapulldown',
-  -- Genetic database directory passed to create_individual_features.py as
-  -- --data_dir (AlphaFold 3 layout: uniref90_2022_05.fa, mgy_clusters_2022_05.fa,
-  -- ..., mmcif_files/). The feature stage refuses to run without it.
-  data_dir VARCHAR(500) NOT NULL DEFAULT '/home/linuxhomes/software/genetic_db',
-  -- Optional --pdb_seqres_database_path. AlphaPulldown looks for
-  -- <data_dir>/pdb_seqres_2022_09_28.fasta; this cluster keeps the file at
-  -- pdb_seqres/pdb_seqres.txt instead. Empty = leave it to AlphaPulldown.
-  pdb_seqres_path VARCHAR(500) NOT NULL DEFAULT '/home/linuxhomes/software/genetic_db/pdb_seqres/pdb_seqres.txt',
-  -- AlphaFold 3 model weights directory, passed to run_multimer_jobs.py as
-  -- --data_dir (the weights file af3.bin lives in it).
-  weights_dir VARCHAR(500) NOT NULL DEFAULT '/home/linuxhomes/software/alphafold3/models',
+  env_name VARCHAR(255) NOT NULL DEFAULT 'alphapulldown',
+  -- AlphaFold database directory passed to create_individual_features.py as
+  -- --data_dir (jackhmmer/hhblits searches and templates). Empty until the
+  -- user sets it in Setup - the MSA stage refuses to run without it.
+  data_dir VARCHAR(500) NOT NULL DEFAULT '',
+  -- 1 = ask the public ColabFold MMseqs2 API for MSAs (needs internet from
+  -- the compute node) instead of searching data_dir.
+  msa_use_mmseqs2 TINYINT(1) NOT NULL DEFAULT 0,
   max_template_date VARCHAR(10) NOT NULL DEFAULT '2050-01-01',
-  -- Resource request of ONE protein of the feature stage.
+  -- Resource request of ONE MSA array task (one protein).
   -- Empty = omit --partition and let the cluster pick its default.
   msa_partition VARCHAR(100) NOT NULL DEFAULT '',
   msa_cpus_per_task INT NOT NULL DEFAULT 8,
   msa_mem VARCHAR(20) NOT NULL DEFAULT '64G',
   msa_time VARCHAR(20) NOT NULL DEFAULT '10:00:00',
-  -- How many proteins one feature job searches at once (its single allocation
-  -- holds this many per-protein slots).
+  -- How many proteins one MSA job searches at once (its single allocation
+  -- holds this many per-protein slots), and how many ABCFold jobs may be in
+  -- flight at once.
   msa_array_throttle INT NOT NULL DEFAULT 4,
-  -- Resource request of ONE prediction job (one complex = one Slurm job).
-  fold_partition VARCHAR(100) NOT NULL DEFAULT 'gpu',
-  fold_gres VARCHAR(50) NOT NULL DEFAULT 'gpu:1',
-  fold_cpus_per_task INT NOT NULL DEFAULT 8,
-  fold_mem VARCHAR(20) NOT NULL DEFAULT '64G',
-  fold_time VARCHAR(20) NOT NULL DEFAULT '24:00:00',
-  -- 1 = let AlphaFold 3 spill into host memory when the GPU's memory is full
-  -- (XLA_PYTHON_CLIENT_PREALLOCATE=false, TF_FORCE_UNIFIED_MEMORY=true,
-  -- XLA_CLIENT_MEM_FRACTION=3.2 - AlphaFold 3's own recommendation); slower,
-  -- but lets a 24 GB GPU fold larger complexes.
-  fold_unified_memory TINYINT(1) NOT NULL DEFAULT 1,
-  -- How many prediction jobs may be in flight at once.
   cofold_max_parallel INT NOT NULL DEFAULT 20,
   -- A complex longer than this (residues) is flagged as unlikely to be
-  -- feasible.
+  -- feasible. Defaults to AlphaPulldown's own length filter for AlphaFold2.
   warn_max_complex_aa INT NOT NULL DEFAULT 5000,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -85,8 +65,8 @@ CREATE TABLE IF NOT EXISTS alphapulldown_settings (
   -- coreApi.authenticateToken) instead.
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- A project owns one set of proteins and ties the stages together
--- (sequences -> features -> prediction -> results). project_number is per-owner sequential
+-- A project owns one set of proteins and ties the three stages together
+-- (sequences -> MSA -> co-folding). project_number is per-owner sequential
 -- (1, 2, 3, ...), shown as "P<number>" and used to name the project's own
 -- folder under the user's workspace (module-AlphaPulldown/P<number>) - not
 -- the same as id, which is global across every user.
@@ -125,9 +105,8 @@ CREATE TABLE IF NOT EXISTS alphapulldown_project_sequences (
   KEY idx_project_id (project_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- One row per feature run: a single Slurm job that runs
--- create_individual_features.py for the project's proteins (the MSA and
--- template search, see backend/services/msaPlan.js). The run's own folder
+-- One row per MSA run: a single Slurm job that searches the project's
+-- proteins (see backend/services/msaPlan.js). The run's own folder
 -- (run_dir, relative to the project folder) holds the scripts, the per-protein
 -- logs and timings.tsv; protein names live only there and in the project's
 -- own sequences, never in this table. method/hardware/cpus snapshot what was
@@ -156,25 +135,25 @@ CREATE TABLE IF NOT EXISTS alphapulldown_msa_runs (
   KEY idx_project_id (project_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- One row per prediction run (the table keeps its historical "cofold" name):
--- a batch of complexes - bait-candidate pairs, pairs of one list, or single
--- homo-oligomers - each predicted by its own Slurm job running AlphaPulldown's
--- run_multimer_jobs.py (see backend/services/cofoldPlan.js). max_parallel
--- snapshots how many of them may be in flight at once; the other columns
--- snapshot the AlphaFold 3 options asked for so the run's speed samples stay
--- correct if the defaults change later. method/hardware are the labels the
--- run's samples are filed under.
+-- One row per co-folding run: a batch of bait-candidate pairs, each folded by
+-- its own ABCFold job (through the ABCFold module, see
+-- backend/services/abcfoldClient.js). max_parallel snapshots how many of them
+-- may be in flight at once; the other columns snapshot the options asked for
+-- so the run's speed samples stay correct if the defaults change later.
+-- method/hardware are the labels the run's samples are filed under.
 CREATE TABLE IF NOT EXISTS alphapulldown_cofold_runs (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   project_id BIGINT NOT NULL,
   owner_id BIGINT NOT NULL,
   total INT NOT NULL,
   max_parallel INT NOT NULL,
-  -- --num_seeds, --num_diffusion_samples and --num_recycles of AlphaFold 3.
   model_seeds INT NOT NULL DEFAULT 1,
-  diffusion_samples INT NOT NULL DEFAULT 5,
-  num_recycles INT NOT NULL DEFAULT 10,
+  -- 'default' (leave it to the ABCFold module's own setting), 'yes' or 'no'.
+  mmseqs2 VARCHAR(10) NOT NULL DEFAULT 'default',
+  templates TINYINT(1) NOT NULL DEFAULT 0,
   gpu_count INT NOT NULL DEFAULT 1,
+  -- 1 = hand ABCFold the MSA file from the MSA stage where there is one.
+  reuse_msa TINYINT(1) NOT NULL DEFAULT 0,
   method VARCHAR(50) NOT NULL DEFAULT '',
   hardware VARCHAR(100) NOT NULL DEFAULT '',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -182,15 +161,14 @@ CREATE TABLE IF NOT EXISTS alphapulldown_cofold_runs (
   KEY idx_project_id (project_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- One row per complex of a prediction run. bait_name/cand_name are the
--- project's own protein names (cand_name is NULL for a homo-oligomer, which
--- folds one protein alone, and equals bait_name for the A+A pair of
--- all-versus-all); they live here and never in the speed samples. state is
--- QUEUED (not submitted yet), SUBMITTING, SUBMIT_FAILED, or - once the Slurm
--- job exists - Slurm's own state words. slurm_job_id is the id the Slurm
--- module answered with; the job's own folder is predictions/run-<run_id>/job-<id>
--- under the project folder. speed_ingested_at is the private-side marker that
--- this pair's timings were copied (anonymised) into alphapulldown_speed_samples.
+-- One row per pair of a co-folding run. bait_name/cand_name are the project's
+-- own protein names (cand_name is NULL for a homo-oligomer, which folds one
+-- protein alone); they live here and never in the speed samples. state is
+-- QUEUED (not submitted yet), SUBMITTING, SUBMIT_FAILED, or - once ABCFold's
+-- job exists - Slurm's own state words. abcfold_job_id/slurm_job_id are the
+-- ids the ABCFold module answered with. speed_ingested_at is the private-side
+-- marker that this pair's timings were copied (anonymised) into
+-- alphapulldown_speed_samples.
 CREATE TABLE IF NOT EXISTS alphapulldown_cofold_items (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   run_id BIGINT NOT NULL,
@@ -202,6 +180,7 @@ CREATE TABLE IF NOT EXISTS alphapulldown_cofold_items (
   state VARCHAR(30) NOT NULL DEFAULT 'QUEUED',
   attempts INT NOT NULL DEFAULT 0,
   last_error VARCHAR(500) NULL,
+  abcfold_job_id VARCHAR(40) NULL,
   slurm_job_id VARCHAR(40) NULL,
   claimed_at DATETIME NULL,
   checked_at DATETIME NULL,
@@ -209,38 +188,24 @@ CREATE TABLE IF NOT EXISTS alphapulldown_cofold_items (
   started_at DATETIME NULL,
   ended_at DATETIME NULL,
   speed_ingested_at DATETIME NULL,
-  -- The scores of the best-ranked model, read once from AlphaFold 3's
-  -- <fold>_summary_confidences.json when the job completed (see
-  -- backend/services/foldResults.js), so the Results tab can sort and filter in
-  -- SQL. scored_at is set once that has been tried; NULL scores with scored_at
-  -- set mean no summary file was found. interface_pae_min is the lowest PAE
-  -- between two different chains; has_clash is 0/1.
-  iptm DOUBLE NULL,
-  ptm DOUBLE NULL,
-  ranking_score DOUBLE NULL,
-  interface_pae_min DOUBLE NULL,
-  has_clash TINYINT(1) NULL,
-  scored_at DATETIME NULL,
   KEY idx_run_state (run_id, state),
-  KEY idx_project_pair (project_id, bait_name, cand_name),
-  KEY idx_project_scored (project_id, scored_at)
+  KEY idx_project_pair (project_id, bait_name, cand_name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Anonymised speed samples: how long one feature search or one prediction job
+-- Anonymised speed samples: how long one MSA search or one co-folding job
 -- took for a given size on given hardware. Shared by every user of this
 -- module and used to estimate future runs; each finished job adds one row.
 -- Deliberately holds NO owner, project, job, accession, protein name,
 -- sequence or timestamp finer than a day - only sizes, a method label, a
 -- hardware label, timings and an outcome. The link between a private job
 -- and the sample it produced lives only on the private side (the
--- speed_ingested_at column on the feature run and prediction item rows), so a sample cannot be traced back to anyone. There is
+-- speed_ingested_at column on the MSA run and co-folding item rows), so a sample cannot be traced back to anyone. There is
 -- intentionally no route that lets a client write here: rows come only from
 -- backend/services/speedRecorder.js, from jobs this module itself observed.
--- stage: 'msa' (one protein's feature search, len_b NULL) or 'fold' (one
--- complex of one or two proteins, total_len = all chains together).
--- method: short label of what was run (e.g. 'af3' for the feature stage,
--- 'af3-s1-d5-r10' for a prediction); hardware: short label of where (e.g.
--- 'partition/8cpu').
+-- stage: 'msa' (one protein, len_b NULL) or 'fold' (one complex of one or two
+-- proteins, total_len = all chains together).
+-- method: short label of what was run (e.g. 'mmseqs2' or 'local' for the MSA
+-- stage); hardware: short label of where (e.g. 'partition/8cpu').
 CREATE TABLE IF NOT EXISTS alphapulldown_speed_samples (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   stage VARCHAR(10) NOT NULL,

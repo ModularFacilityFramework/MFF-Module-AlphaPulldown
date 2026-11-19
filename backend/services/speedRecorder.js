@@ -2,7 +2,7 @@
 // database (see backend/db/schema.sql for what it may and may not hold).
 //
 // Nothing outside this module's own backend ever writes here, and there is
-// no route for it: the feature and prediction stages call recordSamples() with
+// no route for it: the MSA and co-folding stages call recordSamples() with
 // what they measured. sanitiseSample() copies only the whitelisted numeric
 // and label fields into the row, so a caller that passes more (a protein
 // name, a job id, an owner) cannot leak it into the table.

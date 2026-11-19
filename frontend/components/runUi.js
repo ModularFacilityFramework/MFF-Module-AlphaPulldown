@@ -1,4 +1,4 @@
-// Small helpers the Features, Prediction and Results tabs share: how an error from the
+// Small helpers the MSA and Co-folding tabs share: how an error from the
 // module's routes reads, how a Slurm state colours its badge, how a time shows.
 const BAD_STATES = ['FAILED', 'TIMEOUT', 'OUT_OF_MEMORY', 'NODE_FAIL', 'BOOT_FAIL', 'DEADLINE', 'SUBMIT_FAILED'];
 

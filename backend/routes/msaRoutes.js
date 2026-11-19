@@ -1,4 +1,4 @@
-// The Features (CPU) tab's backend: plan a run, write its scripts into the
+// The MSA (CPU) tab's backend: plan a run, write its scripts into the
 // project's folder, submit it through the Slurm module, follow it, and copy
 // its timings (anonymised) into the speed database once it ends. Every query
 // is scoped to req.user.id. Everything this module needs from core comes
@@ -10,7 +10,7 @@
 const express = require('express');
 const fs = require('fs').promises;
 const path = require('path');
-const { projectDir, featuresDir: featuresDirOf, isInside } = require('../services/projectPaths');
+const { projectDir, isInside } = require('../services/projectPaths');
 const { getRequestContext } = require('../services/requestContext');
 const { loadSettings } = require('../services/settingsStore');
 const { msaProfile } = require('../services/speedProfiles');
@@ -18,8 +18,8 @@ const { recordSamples } = require('../services/speedRecorder');
 const slurm = require('../services/slurmClient');
 const { httpError, makeHelpers } = require('../services/routeHelpers');
 const plan = require('../services/msaPlan');
-const { namesWithFeatures } = require('../services/featureFiles');
 
+const FEATURES_DIRNAME = 'features';
 const MAX_LISTED_RUNS = 50;
 const MAX_FAILED_LISTED = 200;
 const LOG_TAIL_BYTES = 64 * 1024;
@@ -36,6 +36,17 @@ async function readTextIfExists(file) {
     return await fs.readFile(file, 'utf8');
   } catch (err) {
     if (err.code === 'ENOENT') return '';
+    throw err;
+  }
+}
+
+// Names that already have a features file (<name>.pkl or <name>.pkl.xz).
+async function namesWithFeatures(dir) {
+  try {
+    const entries = await fs.readdir(dir);
+    return new Set(entries.map(e => e.replace(/\.pkl(\.xz)?$/, '')).filter((n, i) => n !== entries[i]));
+  } catch (err) {
+    if (err.code === 'ENOENT') return new Set();
     throw err;
   }
 }
@@ -83,7 +94,7 @@ module.exports = function buildRouter(coreApi) {
     let done = 0;
     let featuresDir = null;
     if (workspace.active) {
-      featuresDir = featuresDirOf(workspace.path, project.project_number);
+      featuresDir = path.join(projectDir(workspace.path, project.project_number), FEATURES_DIRNAME);
       if (!redo) {
         const existing = await namesWithFeatures(featuresDir);
         done = proteins.filter(p => existing.has(p.name)).length;

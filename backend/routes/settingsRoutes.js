@@ -7,28 +7,20 @@ const { getRequestContext } = require('../services/requestContext');
 // Used whenever a user has no alphapulldown_settings row yet, so GET always
 // returns something PUT can upsert without the frontend special-casing "no
 // settings saved yet" vs "existing settings". Mirrors the column DEFAULTs in
-// backend/db/schema.sql, which describe this cluster's AlphaPulldown 2.9 /
-// AlphaFold 3 installation. msa_partition is empty on purpose: leaving it out
-// lets the cluster pick its default.
+// backend/db/schema.sql. data_dir and msa_partition are empty on purpose:
+// they are facts about the user's cluster that this module cannot know.
 const DEFAULT_SETTINGS = {
   slurm_mail_type: 'BEGIN,END,FAIL',
   env_manager: 'micromamba',
-  env_name: 'alphafold3_alphapulldown',
-  data_dir: '/home/linuxhomes/software/genetic_db',
-  pdb_seqres_path: '/home/linuxhomes/software/genetic_db/pdb_seqres/pdb_seqres.txt',
-  weights_dir: '/home/linuxhomes/software/alphafold3/models',
+  env_name: 'alphapulldown',
+  data_dir: '',
+  msa_use_mmseqs2: 0,
   max_template_date: '2050-01-01',
   msa_partition: '',
   msa_cpus_per_task: 8,
   msa_mem: '64G',
   msa_time: '10:00:00',
   msa_array_throttle: 4,
-  fold_partition: 'gpu',
-  fold_gres: 'gpu:1',
-  fold_cpus_per_task: 8,
-  fold_mem: '64G',
-  fold_time: '24:00:00',
-  fold_unified_memory: 1,
   cofold_max_parallel: 20,
   warn_max_complex_aa: 5000
 };
@@ -41,23 +33,15 @@ const ENV_MANAGERS = ['micromamba', 'conda'];
 const PATTERNS = {
   slurm_mail_type: /^[A-Z_,]{0,50}$/,
   env_name: /^[\w.-]{1,255}$/,
-  data_dir: /^\/[\w./-]{0,499}$/,
-  pdb_seqres_path: /^(\/[\w./-]{0,499})?$/,
-  weights_dir: /^\/[\w./-]{0,499}$/,
+  data_dir: /^(\/[\w./-]{0,499})?$/,
   max_template_date: /^\d{4}-\d{2}-\d{2}$/,
   msa_partition: /^[\w.,-]{0,100}$/,
   msa_mem: /^\d{1,6}[KMGT]?$/i,
-  msa_time: /^(\d{1,3}-)?\d{1,3}(:\d{2}){0,2}$/,
-  fold_partition: /^[\w.,-]{0,100}$/,
-  // gpu:1, gpu:rtx_a5000:1 ...; empty = no GPU requested (a CPU-only test).
-  fold_gres: /^([\w.-]+(:[\w.-]+){0,2})?$/,
-  fold_mem: /^\d{1,6}[KMGT]?$/i,
-  fold_time: /^(\d{1,3}-)?\d{1,3}(:\d{2}){0,2}$/
+  msa_time: /^(\d{1,3}-)?\d{1,3}(:\d{2}){0,2}$/
 };
 const INTEGER_RANGES = {
   msa_cpus_per_task: [1, 512],
   msa_array_throttle: [1, 1000],
-  fold_cpus_per_task: [1, 512],
   cofold_max_parallel: [1, 1000],
   warn_max_complex_aa: [100, 100000]
 };
@@ -72,7 +56,7 @@ function normalizeSettings(body) {
   }
 
   if (!ENV_MANAGERS.includes(values.env_manager)) return { error: 'env_manager must be micromamba or conda' };
-  values.fold_unified_memory = values.fold_unified_memory ? 1 : 0;
+  values.msa_use_mmseqs2 = values.msa_use_mmseqs2 ? 1 : 0;
 
   for (const [field, pattern] of Object.entries(PATTERNS)) {
     if (typeof values[field] !== 'string' || !pattern.test(values[field])) return { error: `${field} has an invalid value` };
