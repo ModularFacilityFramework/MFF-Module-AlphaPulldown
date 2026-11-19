@@ -1,5 +1,5 @@
 /* The panels, tables, badges and buttons come from MsaTab.module.css (same
-   core UI guide values); only what is specific to co-folding is here. */
+   core UI guide values); only what is specific to the prediction stage is here. */
 
 .form {
   display: flex;

@@ -1,0 +1,70 @@
+/* The panel, table, buttons and hints come from MsaTab.module.css (same core
+   UI guide values); only what is specific to the results table is here. */
+
+.tableWrapper {
+  overflow-x: auto;
+}
+
+.sortButton {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.sortButton:hover {
+  text-decoration: underline;
+}
+
+.search {
+  width: 160px;
+  padding: 4px 8px;
+  font-size: 13px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.number {
+  width: 70px;
+  padding: 4px 8px;
+  font-size: 13px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.pager {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 12px;
+  color: #666;
+}
+
+.files {
+  white-space: nowrap;
+}
+
+.files button + button {
+  margin-left: 4px;
+}
+
+/* ipTM bands, as text colours that stay readable on the white table */
+.high {
+  color: #1e7e34;
+  font-weight: 600;
+}
+
+.medium {
+  color: #a66a00;
+  font-weight: 600;
+}
+
+.low {
+  color: #b02a37;
+  font-weight: 600;
+}

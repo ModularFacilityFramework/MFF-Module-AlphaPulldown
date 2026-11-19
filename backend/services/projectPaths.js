@@ -11,6 +11,30 @@ function projectDir(workspacePath, projectNumber) {
   return path.join(workspacePath, MODULE_DIRNAME, `P${projectNumber}`);
 }
 
+const FEATURES_DIRNAME = 'features';
+const PREDICTIONS_DIRNAME = 'predictions';
+
+// Where the Features tab leaves <name>_af3_input.json.xz for every protein.
+function featuresDir(workspacePath, projectNumber) {
+  return path.join(projectDir(workspacePath, projectNumber), FEATURES_DIRNAME);
+}
+
+// One prediction job's own folder: its scripts, slurm.out/err and output/.
+// Throws if the pieces would put it anywhere but under the project's
+// predictions folder.
+function predictionJobDir(workspacePath, projectNumber, runId, itemId) {
+  const base = path.join(projectDir(workspacePath, projectNumber), PREDICTIONS_DIRNAME);
+  const dir = path.join(base, `run-${runId}`, `job-${itemId}`);
+  if (!isInside(base, dir) || dir === base) throw new Error('Prediction folder is outside the project');
+  return dir;
+}
+
+// The JAX compilation cache every job of a project shares, so a model shape
+// compiled once is not compiled again by the next job.
+function jaxCacheDir(workspacePath, projectNumber) {
+  return path.join(projectDir(workspacePath, projectNumber), PREDICTIONS_DIRNAME, 'jax-cache');
+}
+
 // A relative path is safe to join onto a project folder if every one of its
 // segments is a plain name (letters/digits/./-/_ as characters, never a whole
 // segment of "." or ".."). Rejects absolute paths and any path-traversal
@@ -28,4 +52,4 @@ function isInside(base, candidate) {
   return resolvedCandidate === resolvedBase || resolvedCandidate.startsWith(resolvedBase + path.sep);
 }
 
-module.exports = { MODULE_DIRNAME, projectDir, isSafeRelativePath, isInside };
+module.exports = { MODULE_DIRNAME, projectDir, featuresDir, predictionJobDir, jaxCacheDir, isSafeRelativePath, isInside };

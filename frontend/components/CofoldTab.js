@@ -1,10 +1,12 @@
-// Co-folding (GPU) tab: shows which bait-candidate pairs a run would fold
-// (how many, how large, what it should take), starts it, and follows every
-// pair. Each pair is its own ABCFold job; the backend submits them through the
-// ABCFold module as slots free up and records how long each one took. Only
-// ever touches core through the coreApi prop; all calls go to this module's
-// own /alphapulldown routes.
+// Prediction (GPU) tab: shows which complexes a run would predict (how many,
+// how large, what it should take), starts it, and follows every complex. Each
+// complex is its own Slurm job running AlphaPulldown's run_multimer_jobs.py
+// with the AlphaFold 3 backend; the backend submits them through the Slurm
+// module as slots free up and records how long each one took. Only ever
+// touches core through the coreApi prop; all calls go to this module's own
+// /alphapulldown routes (the historical /cofold path).
 import React, { useCallback, useEffect, useState } from 'react';
+import LogViewer from './LogViewer';
 import { formatDuration } from './formatDuration';
 import { errorText, badgeClass as badgeClassFor, formatWhen } from './runUi';
 import styles from '../styles/MsaTab.module.css';
@@ -14,18 +16,14 @@ const POLL_MS = 10000;
 const QUICK_POLL_MS = 1500;
 const PLAN_DELAY_MS = 350;
 const PAGE = 100;
+const LOG_POLL_MS = 5000;
 const GROUPS = [
-  ['', 'All pairs'], ['queued', 'Waiting to be submitted'], ['running', 'Submitted / running'],
+  ['', 'All complexes'], ['queued', 'Waiting to be submitted'], ['running', 'Submitted / running'],
   ['done', 'Done'], ['failed', 'Failed'], ['cancelled', 'Cancelled']
 ];
-const MSA_CHOICES = [
-  ['default', "As set in the ABCFold module"],
-  ['yes', 'Public MMseqs2 server'],
-  ['no', 'Local database']
-];
+// AlphaFold 3's own defaults.
 const DEFAULT_OPTIONS = {
-  seeds: 1, gpuCount: 1, mmseqs2: 'default', templates: false, reuseMsa: false,
-  includeOversize: false, limit: '', baits: []
+  seeds: 1, samples: 5, recycles: 10, includeOversize: false, limit: '', baits: []
 };
 
 function badgeClass(state) {
@@ -41,10 +39,8 @@ function pairSeconds(item) {
 function planParams(options) {
   return {
     seeds: options.seeds,
-    gpuCount: options.gpuCount,
-    mmseqs2: options.mmseqs2,
-    templates: options.templates ? 1 : 0,
-    reuseMsa: options.reuseMsa ? 1 : 0,
+    samples: options.samples,
+    recycles: options.recycles,
     includeOversize: options.includeOversize ? 1 : 0,
     limit: options.limit,
     baits: options.baits.join(',')
@@ -54,10 +50,8 @@ function planParams(options) {
 function runBody(options) {
   return {
     seeds: Number(options.seeds),
-    gpuCount: Number(options.gpuCount),
-    mmseqs2: options.mmseqs2,
-    templates: options.templates,
-    reuseMsa: options.reuseMsa,
+    samples: Number(options.samples),
+    recycles: Number(options.recycles),
     includeOversize: options.includeOversize,
     limit: options.limit === '' ? null : Number(options.limit),
     baits: options.baits.length > 0 ? options.baits : null
@@ -70,8 +64,8 @@ function EstimateLine({ plan }) {
   if (!e.available) {
     return (
       <p className={own.estimate}>
-        {`No time estimate for these settings yet: ${e.samples || 0} of ${e.needed || 5} finished pairs recorded with them. `}
-        Every finished pair adds its speed.
+        {`No time estimate for these settings yet: ${e.samples || 0} of ${e.needed || 5} finished predictions recorded with them. `}
+        Every finished prediction adds its speed.
       </p>
     );
   }
@@ -96,21 +90,19 @@ function PlanPanel({ plan, options, onOptions, onStart, starting }) {
 
       <div className={own.form}>
         <label className={own.field}>
-          Model seeds
+          Seeds (--num_seeds)
           <input className={own.number} type="number" min="1" max="20" value={options.seeds} onChange={e => set({ seeds: e.target.value })} />
         </label>
         <label className={own.field}>
-          GPUs per pair
-          <input className={own.number} type="number" min="1" max="8" value={options.gpuCount} onChange={e => set({ gpuCount: e.target.value })} />
+          Diffusion samples (--num_diffusion_samples)
+          <input className={own.number} type="number" min="1" max="20" value={options.samples} onChange={e => set({ samples: e.target.value })} />
         </label>
         <label className={own.field}>
-          MSA search
-          <select className={styles.select} value={options.mmseqs2} onChange={e => set({ mmseqs2: e.target.value })}>
-            {MSA_CHOICES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-          </select>
+          Recycles (--num_cycle)
+          <input className={own.number} type="number" min="1" max="30" value={options.recycles} onChange={e => set({ recycles: e.target.value })} />
         </label>
         <label className={own.field}>
-          Only the first N pairs
+          Only the first N complexes
           <input className={own.number} type="number" min="1" placeholder="all" value={options.limit} onChange={e => set({ limit: e.target.value })} />
         </label>
         {plan.baits.length > 1 && (
@@ -130,26 +122,10 @@ function PlanPanel({ plan, options, onOptions, onStart, starting }) {
       </div>
 
       <div className={own.checks}>
-        <label className={styles.checkboxField}>
-          <input type="checkbox" checked={options.templates} onChange={e => set({ templates: e.target.checked })} />
-          <span>Use structural templates</span>
-        </label>
-        <label className={styles.checkboxField}>
-          <input type="checkbox" checked={options.reuseMsa} onChange={e => set({ reuseMsa: e.target.checked })} />
-          <span>
-            {`Hand over the MSAs from the MSA tab (${plan.msa.reusable.toLocaleString()} of ${plan.msa.proteins.toLocaleString()} proteins have one)`}
-          </span>
-        </label>
-        {options.reuseMsa && (
-          <span className={styles.hint}>
-            Only proteins searched with MMseqs2 leave a reusable MSA file. This takes effect once the ABCFold module accepts
-            per-chain MSA files; until then it searches for its own.
-          </span>
-        )}
         {plan.oversize > 0 && (
           <label className={styles.checkboxField}>
             <input type="checkbox" checked={options.includeOversize} onChange={e => set({ includeOversize: e.target.checked })} />
-            <span>{`Also fold the ${plan.oversize.toLocaleString()} pairs over ${plan.limitAA.toLocaleString()} amino acids (likely to run out of memory)`}</span>
+            <span>{`Also predict the ${plan.oversize.toLocaleString()} complexes over ${plan.limitAA.toLocaleString()} amino acids (likely to run out of memory)`}</span>
           </label>
         )}
       </div>
@@ -157,14 +133,15 @@ function PlanPanel({ plan, options, onOptions, onStart, starting }) {
       {plan.selected > 0 && (
         <p className={styles.summary}>
           <strong>{plan.toRun.toLocaleString()}</strong>
-          {` of ${plan.selected.toLocaleString()} pairs to fold`}
+          {` of ${plan.selected.toLocaleString()} complexes to predict`}
           {plan.alreadyDone > 0 ? `, ${plan.alreadyDone.toLocaleString()} already done` : ''}
           {plan.oversize > 0 && !options.includeOversize ? `, ${plan.oversize.toLocaleString()} held back for size` : ''}
-          {`. One ABCFold job per pair, at most ${plan.maxParallel} at once.`}
+          {`. One Slurm job per complex (run_multimer_jobs.py, AlphaFold 3), at most ${plan.maxParallel} at once, `}
+          {`each asking for ${plan.resources.gres || 'no GPU'}${plan.resources.partition ? ` on partition ${plan.resources.partition}` : ''}, ${plan.resources.cpus} CPUs, ${plan.resources.mem} memory and up to ${plan.resources.time}.`}
         </p>
       )}
       {plan.toRun > 0 && <EstimateLine plan={plan} />}
-      {plan.busy && <p className={styles.warning}>Pairs of this project are still queued or running. Wait for them or cancel that run first.</p>}
+      {plan.busy && <p className={styles.warning}>Complexes of this project are still queued or running. Wait for them or cancel that run first.</p>}
 
       {plan.preview.length > 0 && (
         <table className={styles.table}>
@@ -184,9 +161,20 @@ function PlanPanel({ plan, options, onOptions, onStart, starting }) {
 
       <div className={styles.controls}>
         <button type="button" className={styles.btnGreen} onClick={onStart} disabled={blocked || starting}>
-          {starting ? 'Starting...' : `Run ${plan.toRun.toLocaleString()} pairs`}
+          {starting ? 'Starting...' : `Run ${plan.toRun.toLocaleString()} predictions`}
         </button>
       </div>
+      {plan.scripts && (
+        <details className={styles.scripts}>
+          <summary>Show the files of the first complex</summary>
+          {Object.entries(plan.scripts).map(([name, text]) => (
+            <div key={name}>
+              <div className={styles.scriptName}>{name}</div>
+              <pre className={styles.pre}>{text}</pre>
+            </div>
+          ))}
+        </details>
+      )}
     </div>
   );
 }
@@ -214,9 +202,9 @@ function RunCard({ run, open, onToggle, onCancel, onRetry, onDelete, busy }) {
         <span className={`${styles.badge} ${run.cancelledAt ? styles.badgeGray : (run.active ? styles.badgeBlue : (c.failed > 0 ? styles.badgeRed : styles.badgeGreen))}`}>
           {run.cancelledAt ? 'Cancelled' : (run.active ? 'Running' : (c.failed > 0 ? 'Finished with failures' : 'Done'))}
         </span>
-        <span className={styles.muted}>{`${o.seeds} seed${o.seeds === 1 ? '' : 's'}, ${o.gpuCount} GPU${o.gpuCount === 1 ? '' : 's'}`}</span>
+        <span className={styles.muted}>{`${o.seeds} seed${o.seeds === 1 ? '' : 's'}, ${o.samples} sample${o.samples === 1 ? '' : 's'}, ${o.recycles} recycle${o.recycles === 1 ? '' : 's'}`}</span>
         <span className={styles.spacer} />
-        <button type="button" className={styles.btnBlue} onClick={onToggle}>{open ? 'Hide pairs' : 'Pairs'}</button>
+        <button type="button" className={styles.btnBlue} onClick={onToggle}>{open ? 'Hide complexes' : 'Complexes'}</button>
         {c.failed > 0 && !run.cancelledAt && <button type="button" className={styles.btnGreen} onClick={onRetry} disabled={busy}>Retry failed</button>}
         {unfinished && <button type="button" className={styles.btnRed} onClick={onCancel} disabled={busy}>Cancel</button>}
         {!unfinished && <button type="button" className={styles.btnGray} onClick={onDelete} disabled={busy}>Delete</button>}
@@ -233,11 +221,11 @@ function RunCard({ run, open, onToggle, onCancel, onRetry, onDelete, busy }) {
       </div>
       {run.waiting && (
         <div className={styles.hint}>
-          {`Keep this page open: pairs are handed to ABCFold as slots free up (${c.running} of ${run.maxParallel} in flight). Nothing is submitted while the page is closed.`}
+          {`Keep this page open: complexes are handed to Slurm as slots free up (${c.running} of ${run.maxParallel} in flight). Nothing more is submitted while the page is closed; jobs already submitted keep running.`}
         </div>
       )}
-      {run.submitError && <div className={styles.warning}>{`Could not submit the next pair: ${run.submitError}`}</div>}
-      {run.statusError && <div className={styles.warning}>{`Could not refresh the state from ABCFold: ${run.statusError}`}</div>}
+      {run.submitError && <div className={styles.warning}>{`Could not submit the next complex: ${run.submitError}`}</div>}
+      {run.statusError && <div className={styles.warning}>{`Could not refresh the state from Slurm: ${run.statusError}`}</div>}
     </div>
   );
 }
@@ -247,8 +235,26 @@ function RunDetail({ api, projectId, run }) {
   const [offset, setOffset] = useState(0);
   const [page, setPage] = useState(null);
   const [error, setError] = useState('');
+  const [logItem, setLogItem] = useState(null);
+  const [logFile, setLogFile] = useState('slurm.out');
+  const [log, setLog] = useState({ text: '', truncated: false });
 
   useEffect(() => { setOffset(0); }, [group]);
+
+  const loadLog = useCallback(() => {
+    if (!logItem) return Promise.resolve();
+    return api.get(`/alphapulldown/projects/${projectId}/cofold/runs/${run.id}/items/${logItem.id}/log`, { params: { file: logFile } })
+      .then(res => setLog(res.data))
+      .catch(err => setError(errorText(err)));
+  }, [api, projectId, run.id, logItem, logFile]);
+
+  const logActive = !!logItem && run.active;
+  useEffect(() => {
+    loadLog();
+    if (!logActive) return undefined;
+    const timer = setInterval(loadLog, LOG_POLL_MS);
+    return () => clearInterval(timer);
+  }, [loadLog, logActive]);
 
   const c = run.counts;
   useEffect(() => {
@@ -273,11 +279,11 @@ function RunDetail({ api, projectId, run }) {
           </span>
         )}
       </div>
-      {page && page.items.length === 0 && <p className={styles.empty}>No pairs here.</p>}
+      {page && page.items.length === 0 && <p className={styles.empty}>No complexes here.</p>}
       {page && page.items.length > 0 && (
         <table className={styles.table}>
           <thead>
-            <tr><th>Bait</th><th>Candidate</th><th className={styles.numeric}>Amino acids</th><th>State</th><th className={styles.numeric}>Run time</th><th>ABCFold job</th><th /></tr>
+            <tr><th>Bait</th><th>Candidate</th><th className={styles.numeric}>Amino acids</th><th>State</th><th className={styles.numeric}>Run time</th><th>Slurm job</th><th /><th /></tr>
           </thead>
           <tbody>
             {page.items.map(item => {
@@ -289,13 +295,28 @@ function RunDetail({ api, projectId, run }) {
                   <td className={styles.numeric}>{(item.lenA + (item.lenB || 0)).toLocaleString()}</td>
                   <td><span className={`${styles.badge} ${badgeClass(item.state)}`}>{item.state}</span></td>
                   <td className={styles.numeric}>{seconds === null ? '—' : formatDuration(seconds)}</td>
-                  <td className={styles.mono}>{item.abcfoldJobId || '—'}</td>
+                  <td className={styles.mono}>{item.slurmJobId || '—'}</td>
+                  <td>{item.slurmJobId && <button type="button" className={styles.btnGray} onClick={() => { setLogItem(item); setLog({ text: '', truncated: false }); }}>Log</button>}</td>
                   <td className={styles.errorText}>{item.error || ''}</td>
                 </tr>
               );
             })}
           </tbody>
         </table>
+      )}
+      {logItem && (
+        <>
+          <div className={styles.controls}>
+            <span>{`Log of ${logItem.bait}${logItem.cand ? ` + ${logItem.cand}` : ''}:`}</span>
+            <select className={styles.select} value={logFile} onChange={e => setLogFile(e.target.value)}>
+              <option value="slurm.out">Job output (slurm.out)</option>
+              <option value="slurm.err">Job errors (slurm.err - AlphaFold 3 logs here)</option>
+            </select>
+            {log.truncated && <span className={styles.muted}>Showing the last 64 KB</span>}
+            <button type="button" className={styles.btnGray} onClick={() => setLogItem(null)}>Close log</button>
+          </div>
+          <LogViewer text={log.text} />
+        </>
       )}
     </div>
   );
@@ -320,7 +341,7 @@ function CofoldTab({ coreApi, project, onChanged }) {
   const loadRuns = useCallback(() => api.get(`${base}/runs`)
     .then(res => {
       setRuns(res.data.runs);
-      // Finished pairs add their timings to the speed database, which changes the estimates.
+      // Finished predictions add their timings to the speed database, which changes the estimates.
       if (res.data.ingestedNow > 0) onChanged();
     })
     .catch(err => setError(errorText(err))), [api, base, onChanged]);
@@ -348,7 +369,7 @@ function CofoldTab({ coreApi, project, onChanged }) {
     return () => clearInterval(timer);
   }, [anyActive, loadRuns, loadPlan]);
 
-  // The backend hands out only a few pairs per call; while it says there is
+  // The backend hands out only a few complexes per call; while it says there is
   // more to submit, ask again soon instead of waiting for the next poll.
   const anyMore = !!runs && runs.some(r => r.more);
   useEffect(() => {

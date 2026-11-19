@@ -103,23 +103,21 @@ function describeLabels(stage, method, hardware) {
   let methodText = method || 'not recorded';
   let hardwareText = hardware || 'not recorded';
   if (stage === 'msa') {
-    if (method === 'mmseqs2') methodText = 'MMseqs2 server search';
+    if (method === 'af3') methodText = 'AlphaFold 3 feature search (local databases)';
+    else if (method === 'mmseqs2') methodText = 'MMseqs2 server search';
     else if (method === 'local') methodText = 'Local database search';
     const parts = /^(.+)\/(\d+)cpu$/.exec(hardware);
     if (parts) hardwareText = `${parts[2]} CPUs, ${parts[1] === 'default' ? 'default partition' : `partition ${parts[1].replace(/\+/g, ' or ')}`}`;
   } else {
-    const parts = /^s(\d+)-(msadefault|mmseqs2|localdb)(-tpl)?(-reuse)?$/.exec(method);
-    if (parts) {
-      const search = { msadefault: 'ABCFold chooses the search', mmseqs2: 'MMseqs2 server', localdb: 'local database' }[parts[2]];
-      methodText = [
-        `${parts[1]} seed${parts[1] === '1' ? '' : 's'}`,
-        search,
-        parts[3] ? 'templates' : 'no templates',
-        parts[4] ? 'MSAs from the MSA tab' : null
-      ].filter(Boolean).join(', ');
+    const af3 = /^af3-s(\d+)-d(\d+)-r(\d+)$/.exec(method);
+    if (af3) {
+      const plural = n => (n === '1' ? '' : 's');
+      methodText = `AlphaFold 3: ${af3[1]} seed${plural(af3[1])}, ${af3[2]} diffusion sample${plural(af3[2])}, ${af3[3]} recycle${plural(af3[3])}`;
     }
-    const gpus = /^gpu(\d+)$/.exec(hardware);
-    if (gpus) hardwareText = `${gpus[1]} GPU${gpus[1] === '1' ? '' : 's'}`;
+    const gpus = /^(.+)\/gpu-(?:(.+)-)?(\d+)$/.exec(hardware);
+    if (gpus) {
+      hardwareText = `${gpus[3]} GPU${gpus[3] === '1' ? '' : 's'}${gpus[2] ? ` (${gpus[2]})` : ''}, ${gpus[1] === 'default' ? 'default partition' : `partition ${gpus[1].replace(/\+/g, ' or ')}`}`;
+    }
   }
   return { methodText, hardwareText };
 }

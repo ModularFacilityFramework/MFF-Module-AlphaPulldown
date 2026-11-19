@@ -9,9 +9,12 @@
 // guide is explicit that a module shouldn't add a second title on top of
 // either.
 //
-// A project (ProjectBar) owns one set of proteins and ties the three
-// pipeline tabs together: Sequences -> MSA (CPU) -> Co-folding (GPU). The
-// stats strip under the tab bar always describes the selected project.
+// A project (ProjectBar) owns one set of proteins and ties the pipeline tabs
+// together, the same steps AlphaPulldown itself has: Sequences -> Features
+// (CPU, create_individual_features.py) -> Prediction (GPU, run_multimer_jobs.py,
+// AlphaFold 3) -> Results. The stats strip under the tab bar always describes
+// the selected project. The tab keys (msa, cofold) are the historical ones the
+// Page Access table stores; only their labels changed.
 //
 // Tab visibility is gated by GET /alphapulldown/page-access (see
 // backend/routes/pageAccessRoutes.js): staff (canManageUsers) always see
@@ -22,6 +25,7 @@ import ProjectBar from './ProjectBar';
 import StatsStrip from './StatsStrip';
 import MsaTab from './MsaTab';
 import CofoldTab from './CofoldTab';
+import ResultsTab from './ResultsTab';
 import SequencesTab from './SequencesTab';
 import SetupTab from './SetupTab';
 import SpeedTab from './SpeedTab';
@@ -29,10 +33,12 @@ import PageAccessTab from './PageAccessTab';
 import styles from '../styles/AlphaPulldownTab.module.css';
 
 // stage: a pipeline tab (needs a selected project, shows the stats strip).
+// needsProject: needs a selected project but has no stats strip of its own.
 const TABS = [
   { key: 'sequences', label: 'Sequences', stage: 'sequences', component: SequencesTab },
-  { key: 'msa', label: 'MSA (CPU)', stage: 'msa', component: MsaTab },
-  { key: 'cofold', label: 'Co-folding (GPU)', stage: 'cofold', component: CofoldTab },
+  { key: 'msa', label: 'Features (CPU)', stage: 'msa', component: MsaTab },
+  { key: 'cofold', label: 'Prediction (GPU)', stage: 'cofold', component: CofoldTab },
+  { key: 'results', label: 'Results', needsProject: true, component: ResultsTab },
   { key: 'setup', label: 'Setup', component: SetupTab }
 ];
 
@@ -113,7 +119,7 @@ function AlphaPulldownTab({ coreApi }) {
 
   const ActiveComponent = currentTab.component;
   const currentProject = projects.find(p => p.id === projectId) || null;
-  const needsProject = !!currentTab.stage;
+  const needsProject = !!currentTab.stage || !!currentTab.needsProject;
   const stats = statsState.projectId === projectId ? statsState.data : null;
 
   return (
@@ -141,7 +147,7 @@ function AlphaPulldownTab({ coreApi }) {
       </div>
 
       <div className={styles.content}>
-        {needsProject && currentProject && <StatsStrip stats={stats} stage={currentTab.stage} />}
+        {!!currentTab.stage && currentProject && <StatsStrip stats={stats} stage={currentTab.stage} />}
         {needsProject && !currentProject ? (
           <div className={styles.empty}>Create a project above to begin.</div>
         ) : (

@@ -8,9 +8,9 @@ const plan = require('./msaPlan');
 
 const SETTINGS = {
   env_manager: 'micromamba',
-  env_name: 'alphapulldown',
-  data_dir: '/data/af2',
-  msa_use_mmseqs2: 0,
+  env_name: 'alphafold3_alphapulldown',
+  data_dir: '/data/af3',
+  pdb_seqres_path: '/data/af3/pdb_seqres/pdb_seqres.txt',
   max_template_date: '2050-01-01',
   msa_partition: 'cpu',
   msa_cpus_per_task: 8,
@@ -57,10 +57,16 @@ test('fewer proteins than slots only asks for what is needed', () => {
   assert.strictEqual(plan.msaResources(SETTINGS, 0).parallel, 1);
 });
 
-test('a run needs a database directory unless MMseqs2 is on', () => {
+test('a run needs a database directory', () => {
   assert.strictEqual(plan.msaProblems(SETTINGS).length, 0);
   assert.strictEqual(plan.msaProblems({ ...SETTINGS, data_dir: '' }).length, 1);
-  assert.strictEqual(plan.msaProblems({ ...SETTINGS, data_dir: '', msa_use_mmseqs2: 1 }).length, 0);
+});
+
+test('feature files are recognised plain or compressed, and by nothing else', () => {
+  assert.strictEqual(plan.featureNameOf('P12345_af3_input.json'), 'P12345');
+  assert.strictEqual(plan.featureNameOf('P12345_af3_input.json.xz'), 'P12345');
+  assert.strictEqual(plan.featureNameOf('my_prot.v2_af3_input.json.xz'), 'my_prot.v2');
+  ['P12345.pkl', 'P12345.json', 'P12345_af3_input.json.gz', 'P12345_feature_metadata_2026-01-01.json', '_af3_input.json'].forEach(n => assert.strictEqual(plan.featureNameOf(n), null, n));
 });
 
 test('proteins are unique by name; a name with two sequences is a conflict', () => {
@@ -110,22 +116,22 @@ test('the submit script carries the resources, the activation and the xargs loop
   assert.match(script, /#SBATCH --cpus-per-task=32/);
   assert.match(script, /#SBATCH --time=1-06:00:00/);
   assert.match(script, /#SBATCH --mail-user=a@b.org/);
-  assert.match(script, /micromamba activate alphapulldown/);
+  assert.match(script, /micromamba activate alphafold3_alphapulldown/);
   assert.match(script, /seq 1 10 \| xargs -P 4 -n 1 bash \.\/run_one\.sh/);
   assert.ok(!/set -e/.test(script));
   const bare = plan.buildSubmitScript({ slug: 's', settings: { ...SETTINGS, msa_partition: '', env_manager: 'conda' }, resources, count: 10 });
   assert.ok(!bare.includes('--partition') && !bare.includes('--mail-user'));
-  assert.match(bare, /conda activate alphapulldown/);
+  assert.match(bare, /conda activate alphafold3_alphapulldown/);
 });
 
-test('the per-protein command uses the local database or MMseqs2, never both', () => {
-  const local = plan.buildRunOneScript(SETTINGS, { featuresDir: '/ws/P1/features', redo: false });
-  assert.match(local, /--data_dir='\/data\/af2'/);
-  assert.match(local, /--skip_existing=True --use_precomputed_msas=True/);
-  assert.ok(!local.includes('use_mmseqs2'));
-  const mm = plan.buildRunOneScript({ ...SETTINGS, msa_use_mmseqs2: 1, data_dir: '' }, { featuresDir: '/ws/P1/features', redo: true });
-  assert.match(mm, /--use_mmseqs2=True/);
-  assert.ok(!mm.includes('--data_dir') && !mm.includes('skip_existing') && !mm.includes('[ -e'));
+test('the per-protein command runs AlphaFold 3\'s pipeline against the local databases', () => {
+  const normal = plan.buildRunOneScript(SETTINGS, { featuresDir: '/ws/P1/features', redo: false });
+  ['--data_pipeline=alphafold3', '--data_dir=\'/data/af3\'', '--compress_features=True', '--max_template_date=2050-01-01',
+    '--pdb_seqres_database_path=\'/data/af3/pdb_seqres/pdb_seqres.txt\'', '--skip_existing=True'].forEach(f => assert.ok(normal.includes(f), f));
+  assert.ok(!normal.includes('mmseqs'), 'AlphaFold 3 refuses --use_mmseqs2');
+  assert.ok(normal.includes('_af3_input.json.xz'), 'a finished protein is recognised by its feature file');
+  const redo = plan.buildRunOneScript({ ...SETTINGS, pdb_seqres_path: '' }, { featuresDir: '/ws/P1/features', redo: true });
+  assert.ok(!redo.includes('skip_existing') && !redo.includes('[ -e') && !redo.includes('pdb_seqres'));
 });
 
 test('both scripts are valid bash', () => {
@@ -159,12 +165,13 @@ test('run_one.sh and the xargs loop: timings, skip, failure and parallelism', { 
       'sleep 1',
       'if [ "$name" = BAD ]; then echo boom >&2; exit 1; fi',
       'if [ "$name" = KILLED ]; then exit 137; fi',
-      'touch "$out/$name.pkl"',
+      // eslint-disable-next-line no-template-curly-in-string
+      'touch "$out/${name}_af3_input.json.xz"',
       ''
     ].join('\n'), { mode: 0o755 });
 
     const proteins = ['AAA', 'BAD', 'CCC', 'KILLED', 'DDD', 'EEE'].map(name => ({ name, length: name === 'BAD' ? 50 : 100, sequence: 'M'.repeat(10) }));
-    fs.writeFileSync(path.join(features, 'CCC.pkl'), '');
+    fs.writeFileSync(path.join(features, 'CCC_af3_input.json'), '');
     const settings = { ...SETTINGS, msa_array_throttle: 3 };
     const resources = plan.msaResources(settings, proteins.length);
     const files = plan.buildRunFiles({ slug: 'x', settings, email: '', resources, proteins, featuresDir: features, redo: false });
@@ -183,10 +190,10 @@ test('run_one.sh and the xargs loop: timings, skip, failure and parallelism', { 
     assert.strictEqual(timings[3].exit, 137);
     assert.ok(timings[0].seconds >= 1 && timings[0].seconds <= 3);
     assert.strictEqual(timings[2].seconds, 0);
-    assert.ok(fs.existsSync(path.join(features, 'AAA.pkl')) && fs.existsSync(path.join(features, 'EEE.pkl')));
+    assert.ok(fs.existsSync(path.join(features, 'AAA_af3_input.json.xz')) && fs.existsSync(path.join(features, 'EEE_af3_input.json.xz')));
     assert.ok(!fs.existsSync(path.join(run, 'args.3.txt')), 'the skipped protein must not be searched');
     assert.match(fs.readFileSync(path.join(run, 'logs', '2.log'), 'utf8'), /boom/);
-    assert.match(fs.readFileSync(path.join(run, 'args.1.txt'), 'utf8'), /--seq_index=1 .*--data_dir=\/data\/af2/);
+    assert.match(fs.readFileSync(path.join(run, 'args.1.txt'), 'utf8'), /--data_dir=\/data\/af3 .*--seq_index=1/);
     assert.ok(seconds < 4.5, `five 1-second searches, three at a time, took ${seconds}s`);
     assert.ok(!fs.readFileSync(path.join(run, 'timings.tsv'), 'utf8').includes('AAA'), 'timings must hold no names');
   } finally {

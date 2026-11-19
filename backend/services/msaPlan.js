@@ -1,5 +1,8 @@
-// What one MSA run is: which proteins, what the job asks Slurm for, and the
-// two scripts that do the work. Pure functions - no database, no disk, no
+// What one feature run is: which proteins, what the job asks Slurm for, and the
+// two scripts that do the work. The stage is AlphaPulldown's first step -
+// create_individual_features.py with the AlphaFold 3 data pipeline, which
+// searches the genetic databases (jackhmmer/hmmsearch) and writes one
+// <name>_af3_input.json.xz of features per protein. Pure functions - no database, no disk, no
 // Slurm - so they are unit-tested without a running mff-core.
 //
 // One run is ONE Slurm job. Its script runs AlphaPulldown's
@@ -83,10 +86,17 @@ function msaResources(settings, toDo) {
 // Reasons a run cannot start yet, as sentences for the user.
 function msaProblems(settings) {
   const problems = [];
-  if (!settings.msa_use_mmseqs2 && !settings.data_dir) {
-    problems.push('Set the AlphaPulldown database directory in Setup, or tick the MMseqs2 option there.');
-  }
+  if (!settings.data_dir) problems.push('Set the genetic database directory in Setup first.');
   return problems;
+}
+
+// The files create_individual_features.py leaves for one protein: plain or
+// xz-compressed AlphaFold 3 features. Used to tell which proteins are done.
+const FEATURE_FILE = /^(.+)_af3_input\.json(\.xz)?$/;
+
+function featureNameOf(fileName) {
+  const match = FEATURE_FILE.exec(fileName);
+  return match ? match[1] : null;
 }
 
 // One entry per distinct protein name, in the order first seen. A name that
@@ -152,20 +162,23 @@ function activationLines(settings) {
 }
 
 // The flags of one create_individual_features.py call. $i is the 1-based
-// position of the protein in msa_input.fasta. --use_precomputed_msas lets a
-// retry reuse MSA files an earlier attempt already saved; a forced redo
-// starts again from nothing.
+// position of the protein in msa_input.fasta. --skip_existing lets a retry
+// leave the proteins an earlier attempt already finished alone; a forced redo
+// starts again from nothing. --compress_features writes <name>_af3_input.json.xz
+// (AlphaPulldown reads it back transparently). AlphaFold 3's pipeline searches
+// the local databases only - it refuses --use_mmseqs2.
 function featuresArgs(settings, { featuresDir, redo }) {
   const args = [
+    '--data_pipeline=alphafold3',
     '--fasta_paths=msa_input.fasta',
     `--output_dir=${shellQuote(featuresDir)}`,
+    `--data_dir=${shellQuote(settings.data_dir)}`,
     `--max_template_date=${settings.max_template_date}`,
-    '--save_msa_files=True',
+    '--compress_features=True',
     '--seq_index="$i"'
   ];
-  if (settings.msa_use_mmseqs2) args.push('--use_mmseqs2=True');
-  else args.push(`--data_dir=${shellQuote(settings.data_dir)}`);
-  if (!redo) args.push('--skip_existing=True', '--use_precomputed_msas=True');
+  if (settings.pdb_seqres_path) args.push(`--pdb_seqres_database_path=${shellQuote(settings.pdb_seqres_path)}`);
+  if (!redo) args.push('--skip_existing=True');
   return args;
 }
 
@@ -184,7 +197,7 @@ function buildRunOneScript(settings, { featuresDir, redo }) {
   ];
   if (!redo) {
     lines.push(
-      'if [ -e "$features/$name.pkl" ] || [ -e "$features/$name.pkl.xz" ]; then',
+      `if [ -e "$features/\${name}_af3_input.json" ] || [ -e "$features/\${name}_af3_input.json.xz" ]; then`,
       '  printf \'%s\\t%s\\t0\\t0\\tskipped\\n\' "$i" "$len" >> timings.tsv',
       '  exit 0',
       'fi'
@@ -265,6 +278,8 @@ module.exports = {
   parseTimings,
   progressOf,
   samplesFromTimings,
+  featureNameOf,
+  activationLines,
   shellQuote,
   buildRunOneScript,
   buildSubmitScript,

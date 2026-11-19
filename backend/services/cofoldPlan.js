@@ -1,22 +1,27 @@
-// What one co-folding run is: which pairs, what each pair's ABCFold job looks
-// like, and how an item's end state becomes an anonymised speed sample. Pure
-// functions - no database, no disk, no ABCFold - so they are unit-tested
+// What one prediction run is: which complexes, what each complex's Slurm job
+// looks like, and how an item's end state becomes an anonymised speed sample.
+// Pure functions - no database, no disk, no Slurm - so they are unit-tested
 // without a running mff-core.
 //
-// A run is one ABCFold job per pair (a bait with a candidate; a homo-oligomer
-// folds one protein alone). Pairs are listed lazily - a pulldown of a whole
-// proteome has far too many to hold - and a run is capped at MAX_PAIRS_PER_RUN.
+// A run is one Slurm job per complex, each running AlphaPulldown's
+// run_multimer_jobs.py with the AlphaFold 3 backend on the features the
+// Features tab made. A complex is a bait with a candidate (pulldown), two
+// proteins of one list (all-versus-all, including a protein with itself) or a
+// homo-oligomer folded alone. Complexes are listed lazily - a pulldown of a
+// whole proteome has far too many to hold - and a run is capped at
+// MAX_PAIRS_PER_RUN.
 
-const { isTerminalState } = require('./msaPlan');
+const { isTerminalState, shellQuote, activationLines } = require('./msaPlan');
+const { foldHardware } = require('./speedProfiles');
 
 const MAX_PAIRS_PER_RUN = 5000;
 // Planning lists every pair of the selection once to subtract the ones already
 // folded, so the selection itself is bounded too.
 const MAX_PAIRS_TO_PLAN = 100000;
 const MAX_SEEDS = 20;
-const MAX_GPUS = 8;
+const MAX_SAMPLES = 20;
+const MAX_RECYCLES = 30;
 const MAX_SUBMIT_ATTEMPTS = 3;
-const MMSEQS2_CHOICES = ['default', 'yes', 'no'];
 const LOCAL_STATES = ['QUEUED', 'SUBMITTING', 'SUBMIT_FAILED'];
 
 // A pair is finished (nothing more will happen to it without a retry) when
@@ -26,7 +31,7 @@ function isFinishedState(state) {
 }
 
 // QUEUED/SUBMITTING are ours; everything else that is not finished is in
-// ABCFold's/Slurm's hands.
+// Slurm's hands.
 function isInFlightState(state) {
   return state !== 'QUEUED' && !isFinishedState(state);
 }
@@ -46,15 +51,19 @@ function stateGroup(state) {
   return 'running';
 }
 
+// The AlphaFold 3 options of a run, with AlphaFold 3's own defaults: one seed,
+// 5 diffusion samples (so 5 models per seed), 10 recycles.
 function normaliseOptions(raw) {
   const input = raw || {};
   const errors = [];
-  const seeds = input.seeds === undefined ? 1 : Number(input.seeds);
-  if (!Number.isInteger(seeds) || seeds < 1 || seeds > MAX_SEEDS) errors.push(`seeds must be a whole number from 1 to ${MAX_SEEDS}`);
-  const gpuCount = input.gpuCount === undefined ? 1 : Number(input.gpuCount);
-  if (!Number.isInteger(gpuCount) || gpuCount < 1 || gpuCount > MAX_GPUS) errors.push(`gpuCount must be a whole number from 1 to ${MAX_GPUS}`);
-  const mmseqs2 = input.mmseqs2 === undefined ? 'default' : input.mmseqs2;
-  if (!MMSEQS2_CHOICES.includes(mmseqs2)) errors.push(`mmseqs2 must be one of ${MMSEQS2_CHOICES.join(', ')}`);
+  function whole(key, fallback, max, label) {
+    const value = input[key] === undefined || input[key] === null || input[key] === '' ? fallback : Number(input[key]);
+    if (!Number.isInteger(value) || value < 1 || value > max) errors.push(`${label} must be a whole number from 1 to ${max}`);
+    return value;
+  }
+  const seeds = whole('seeds', 1, MAX_SEEDS, 'seeds');
+  const samples = whole('samples', 5, MAX_SAMPLES, 'diffusion samples');
+  const recycles = whole('recycles', 10, MAX_RECYCLES, 'recycles');
   const limit = input.limit === undefined || input.limit === null || input.limit === '' ? null : Number(input.limit);
   if (limit !== null && (!Number.isInteger(limit) || limit < 1)) errors.push('limit must be a whole number of at least 1');
   if (input.baits !== undefined && input.baits !== null && !Array.isArray(input.baits)) errors.push('baits must be a list of names');
@@ -62,10 +71,8 @@ function normaliseOptions(raw) {
     errors,
     options: {
       seeds,
-      gpuCount,
-      mmseqs2,
-      templates: !!input.templates,
-      reuseMsa: !!input.reuseMsa,
+      samples,
+      recycles,
       includeOversize: !!input.includeOversize,
       limit,
       baits: Array.isArray(input.baits) ? input.baits.map(String) : null
@@ -75,10 +82,12 @@ function normaliseOptions(raw) {
 
 // The labels a run's speed samples are filed under; they are what the
 // estimate for a planned run looks up, so both sides use this one function.
-function foldProfile(options) {
-  const search = options.mmseqs2 === 'yes' ? 'mmseqs2' : options.mmseqs2 === 'no' ? 'localdb' : 'msadefault';
-  const method = `s${options.seeds}-${search}${options.templates ? '-tpl' : ''}${options.reuseMsa ? '-reuse' : ''}`;
-  return { method, hardware: `gpu${options.gpuCount}` };
+// 'af3-s1-d5-r10' = AlphaFold 3, 1 seed, 5 diffusion samples, 10 recycles.
+function foldProfile(options, settings) {
+  return {
+    method: `af3-s${options.seeds}-d${options.samples}-r${options.recycles}`,
+    hardware: foldHardware(settings)
+  };
 }
 
 // Spreads the same "describe a set of jobs" shape as sequenceStats.js gives
@@ -112,7 +121,7 @@ function partner(row) {
   return { name: row.name, length: row.length, copies: copiesOf(row), sequence: row.sequence };
 }
 
-// Every pair the project's mode produces, lazily: { bait, cand, lenA, lenB }.
+// Every complex the project's mode produces, lazily: { bait, cand, lenA, lenB }.
 // bait/cand are { name, length, copies, sequence }; cand is null and lenB null
 // for a homo-oligomer. lenA/lenB count every copy. `baits` (a list of names)
 // narrows a pulldown to those baits.
@@ -133,14 +142,16 @@ function* enumeratePairs(mode, rows, baitNames) {
     for (const row of all) yield { bait: partner(row), cand: null, lenA: row.length * copiesOf(row), lenB: null };
     return;
   }
+  // all_vs_all: every unordered pair of the list, a protein with itself
+  // included (AlphaPulldown's own definition: A+A, A+B, B+B, ...).
   for (let i = 0; i < all.length; i += 1) {
-    for (let j = i + 1; j < all.length; j += 1) {
+    for (let j = i; j < all.length; j += 1) {
       yield { bait: partner(all[i]), cand: partner(all[j]), lenA: all[i].length * copiesOf(all[i]), lenB: all[j].length * copiesOf(all[j]) };
     }
   }
 }
 
-// How many pairs a selection holds, without listing them.
+// How many complexes a selection holds, without listing them.
 function countSelection(mode, rows, baitNames) {
   if (mode === 'pulldown') {
     const wanted = baitNames ? new Set(baitNames) : null;
@@ -148,7 +159,7 @@ function countSelection(mode, rows, baitNames) {
     return baits * rows.filter(r => r.role === 'candidate').length;
   }
   const listed = rows.filter(r => r.role === 'all').length;
-  return mode === 'homo_oligomer' ? listed : (listed * (listed - 1)) / 2;
+  return mode === 'homo_oligomer' ? listed : (listed * (listed + 1)) / 2;
 }
 
 const pairKey = (bait, cand) => `${bait}\u0000${cand === null || cand === undefined ? '' : cand}`;
@@ -180,47 +191,88 @@ function selectPairs({ mode, rows, options, completed, limitAA }) {
   return result;
 }
 
-// Chain ids A, B, ... Z, AA, AB, ...
-function chainId(index) {
-  let id = '';
-  let n = index;
-  do {
-    id = String.fromCharCode(65 + (n % 26)) + id;
-    n = Math.floor(n / 26) - 1;
-  } while (n >= 0);
-  return id;
+// One protein of a complex as AlphaPulldown's list files write it: the name,
+// or name:copies for a homo-oligomer state.
+function proteinSpec(p) {
+  return p.copies > 1 ? `${p.name}:${p.copies}` : p.name;
 }
 
-// A name the ABCFold module and the file system will both accept.
-function jobName(projectNumber, pair) {
-  const parts = [`ap-P${projectNumber}`, pair.bait.name].concat(pair.cand ? [pair.cand.name] : []);
-  return parts.join('-').replace(/[^A-Za-z0-9_.-]/g, '_').slice(0, 100);
+// The line of fold_input.txt: the proteins of one complex joined with the
+// default protein delimiter "+" (AlphaPulldown's custom-mode syntax).
+function foldSpec(pair) {
+  return [pair.bait, pair.cand].filter(Boolean).map(proteinSpec).join('+');
 }
 
-// The body for the ABCFold module's POST /jobs (see abcfoldClient.js for the
-// contract this assumes). msaPathFor(name) returns an A3M path or null; it is
-// only consulted when the run reuses MSAs, and the field is simply left out
-// for a protein without one.
-function buildJobBody({ projectNumber, pair, options, msaPathFor }) {
-  const sequences = [];
-  [pair.bait, pair.cand].filter(Boolean).forEach(p => {
-    const msaPath = options.reuseMsa && msaPathFor ? msaPathFor(p.name) : null;
-    for (let copy = 0; copy < p.copies; copy += 1) {
-      const entry = { type: 'protein', id: chainId(sequences.length), sequence: p.sequence };
-      if (msaPath) entry.unpairedMsaPath = msaPath;
-      sequences.push(entry);
-    }
-  });
-  const body = {
-    name: jobName(projectNumber, pair),
-    sequences,
-    modelSeeds: Array.from({ length: options.seeds }, (_, i) => i + 1),
-    models: ['alphafold3'],
-    templates: options.templates,
-    gpuCount: options.gpuCount
+// The arguments of one run_multimer_jobs.py call. --num_cycle is the wrapper's
+// name for AlphaFold 3's --num_recycles. The job's own output folder keeps
+// every complex's results apart (AlphaPulldown adds one sub-folder per fold).
+function foldArgs(settings, options, { featuresDir, outputDir, cacheDir }) {
+  return [
+    '--mode=custom',
+    '--protein_lists=fold_input.txt',
+    `--monomer_objects_dir=${shellQuote(featuresDir)}`,
+    `--output_path=${shellQuote(outputDir)}`,
+    `--data_dir=${shellQuote(settings.weights_dir)}`,
+    '--fold_backend=alphafold3',
+    `--num_seeds=${options.seeds}`,
+    `--num_diffusion_samples=${options.samples}`,
+    `--num_cycle=${options.recycles}`,
+    `--jax_compilation_cache_dir=${shellQuote(cacheDir)}`
+  ];
+}
+
+// The sbatch script of one complex. slug: a single dash-separated token (sbatch
+// splits directive values on whitespace).
+function buildSubmitScript({ slug, settings, email, options, featuresDir, outputDir, cacheDir }) {
+  const lines = [
+    // -i: needed for the micromamba/conda shell hook below to define its
+    // shell function; non-interactive bash skips that setup.
+    '#!/bin/bash -i',
+    `#SBATCH --job-name=${slug}`,
+    '#SBATCH --nodes=1',
+    '#SBATCH --ntasks=1'
+  ];
+  if (settings.fold_partition) lines.push(`#SBATCH --partition=${settings.fold_partition}`);
+  if (settings.fold_gres) lines.push(`#SBATCH --gres=${settings.fold_gres}`);
+  lines.push(
+    `#SBATCH --cpus-per-task=${settings.fold_cpus_per_task}`,
+    `#SBATCH --mem=${settings.fold_mem}`,
+    `#SBATCH --time=${settings.fold_time}`,
+    '#SBATCH --output=slurm.out',
+    '#SBATCH --error=slurm.err'
+  );
+  if (email) {
+    lines.push(`#SBATCH --mail-user=${email}`);
+    if (settings.slurm_mail_type) lines.push(`#SBATCH --mail-type=${settings.slurm_mail_type}`);
+  }
+  // After the activation: conda's own activation scripts are not written for
+  // set -u.
+  lines.push('', ...activationLines(settings), '', 'set -euo pipefail', '');
+  if (settings.fold_unified_memory) {
+    lines.push(
+      '# AlphaFold 3\'s recommendation for GPUs whose memory a large complex can fill:',
+      '# let it spill into host memory (slower, but it finishes).',
+      'export XLA_PYTHON_CLIENT_PREALLOCATE=false',
+      'export TF_FORCE_UNIFIED_MEMORY=true',
+      'export XLA_CLIENT_MEM_FRACTION=3.2',
+      ''
+    );
+  }
+  lines.push(
+    `mkdir -p ${shellQuote(cacheDir)}`,
+    'run_multimer_jobs.py \\',
+    ...foldArgs(settings, options, { featuresDir, outputDir, cacheDir }).map((arg, i, all) => `  ${arg}${i < all.length - 1 ? ' \\' : ''}`),
+    ''
+  );
+  return lines.join('\n');
+}
+
+// Everything written into one complex's folder, as { name: content }.
+function buildFoldFiles({ slug, settings, email, options, pair, featuresDir, outputDir, cacheDir }) {
+  return {
+    'submit.sh': buildSubmitScript({ slug, settings, email, options, featuresDir, outputDir, cacheDir }),
+    'fold_input.txt': `${foldSpec(pair)}\n`
   };
-  if (options.mmseqs2 !== 'default') body.mmseqs2 = options.mmseqs2 === 'yes';
-  return body;
 }
 
 // How an item's end state files its sample: null = no sample (cancelled, never
@@ -278,9 +330,11 @@ module.exports = {
   countSelection,
   pairKey,
   selectPairs,
-  chainId,
-  jobName,
-  buildJobBody,
+  proteinSpec,
+  foldSpec,
+  foldArgs,
+  buildSubmitScript,
+  buildFoldFiles,
   foldOutcome,
   samplesFromItems
 };

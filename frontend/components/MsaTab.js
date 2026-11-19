@@ -1,4 +1,5 @@
-// MSA (CPU) tab: shows what a run of AlphaPulldown's feature search would be
+// Features (CPU) tab: shows what a run of AlphaPulldown's feature step
+// (create_individual_features.py: the MSA and template search) would be
 // for the selected project (how many proteins, what it asks Slurm for),
 // starts it, and follows each run - progress, failed proteins, logs. All of
 // it goes through this module's own /alphapulldown routes; the backend talks
@@ -48,7 +49,6 @@ function PlanPanel({ plan, redo, onRedo, onStart, starting }) {
               {`One Slurm job searches ${r.parallel} protein${r.parallel === 1 ? '' : 's'} at a time (${r.rounds} round${r.rounds === 1 ? '' : 's'}) `}
               {`and asks for ${r.cpus.toLocaleString()} CPUs, ${formatGB(r.memMB)} memory and up to ${r.time}`}
               {r.partition ? ` on partition ${r.partition}.` : ' on the cluster default partition.'}
-              {plan.method === 'mmseqs2' ? ' Searches use the public MMseqs2 server.' : ''}
             </p>
           )}
         </>

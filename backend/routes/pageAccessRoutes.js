@@ -7,8 +7,9 @@ const express = require('express');
 
 const KNOWN_PAGES = [
   { key: 'sequences', label: 'Sequences' },
-  { key: 'msa', label: 'MSA (CPU)' },
-  { key: 'cofold', label: 'Co-folding (GPU)' },
+  { key: 'msa', label: 'Features (CPU)' },
+  { key: 'cofold', label: 'Prediction (GPU)' },
+  { key: 'results', label: 'Results' },
   { key: 'setup', label: 'Setup' }
 ];
 

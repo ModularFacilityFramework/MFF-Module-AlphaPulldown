@@ -1,5 +1,5 @@
 // Project selector above the tab bar. A project owns one set of proteins and
-// ties the Sequences, MSA and Co-folding tabs together. Creating and deleting
+// ties the Sequences, Features, Prediction and Results tabs together. Creating and deleting
 // are handed up (onCreate/onDelete return promises) so AlphaPulldownTab.js
 // stays the single owner of the project list.
 import React, { useState } from 'react';

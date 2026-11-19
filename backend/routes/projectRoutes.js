@@ -1,5 +1,5 @@
-// Projects: one bait/candidate set that ties the Sequences, MSA and
-// Co-folding tabs together. Every query is scoped to req.user.id - a user
+// Projects: one bait/candidate set that ties the Sequences, Features,
+// Prediction and Results tabs together. Every query is scoped to req.user.id - a user
 // only ever sees their own projects. Everything this module needs from core
 // comes through coreApi (see docs/MFF-Core_module-core-api.md).
 const express = require('express');
@@ -18,10 +18,10 @@ module.exports = function buildRouter(coreApi) {
 
   // The numbers for the stats strip: sizes, plus an estimate for each stage
   // from the anonymised speed samples (see services/speedEstimator.js). The
-  // MSA estimate uses the caller's own Setup values. The co-folding options
-  // are chosen per run in the co-folding stage, so the strip uses the labels
+  // feature-search estimate uses the caller's own Setup values. The prediction
+  // options are chosen per run in the Prediction tab, so the strip uses the labels
   // of this project's latest run (estimates.foldBasis 'last-run'); a project
-  // that has not folded yet learns from every fold sample ('all').
+  // that has not predicted yet learns from every fold sample ('all').
   async function statsFor(conn, project, ownerId) {
     const [rows, settings, lastRun] = await Promise.all([
       conn.query('SELECT role, name, length, copies FROM alphapulldown_project_sequences WHERE project_id = ?', [project.id]),

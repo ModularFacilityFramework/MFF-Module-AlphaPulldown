@@ -71,17 +71,18 @@ function describeComplexes(mode, rows) {
     };
   }
 
-  // all_vs_all: every unordered pair of two different proteins.
-  if (all.length < 2) return null;
+  // all_vs_all: every unordered pair of the list, a protein with itself
+  // included (AlphaPulldown's own definition: A+A, A+B, B+B, ...).
+  if (all.length < 1) return null;
   return {
-    count: (all.length * (all.length - 1)) / 2,
-    min: all[0] + all[1],
-    max: all[all.length - 1] + all[all.length - 2],
-    total: (all.length - 1) * sum(all),
+    count: (all.length * (all.length + 1)) / 2,
+    min: 2 * all[0],
+    max: 2 * all[all.length - 1],
+    total: (all.length + 1) * sum(all),
     atMost: x => {
       const ordered = all.reduce((acc, l) => acc + countLE(all, x - l), 0);
       const selfPairs = countLE(all, Math.floor(x / 2));
-      return (ordered - selfPairs) / 2;
+      return (ordered + selfPairs) / 2;
     }
   };
 }
