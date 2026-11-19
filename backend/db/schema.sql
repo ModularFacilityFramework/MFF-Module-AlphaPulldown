@@ -124,6 +124,96 @@ CREATE TABLE IF NOT EXISTS alphapulldown_library_feature_sets (
   KEY idx_proteome_id (proteome_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- The Target tab. A target is the protein (one chain) or complex (several
+-- chains) the user is interested in; there is at most one per project, and
+-- only its owner sees it (developers and administrators may read all).
+-- It is saved as a draft whether or not it is validated or confirmed; the
+-- Baits tab opens only once status is 'confirmed'.
+--   genome_*     the UniProt proteome the user chose as the source organism's
+--                genome (genome_json keeps the UniProt record as it was when
+--                chosen, and what the user typed to find it)
+--   model_*      the 3D model of the target, if any: where it came from (a PDB
+--                entry, the AlphaFold DB, a model predicted with ABCFold, an
+--                uploaded file), its id and version, the stored file (relative
+--                to the project folder) with its checksum, the chains read
+--                from it, and which of the target's chains it was matched
+--                to. model_state is 'selected' until the user accepts it.
+--   chimera_json the user's acknowledgement of a chimeric complex: the chains
+--                that were not confirmed, the warning text shown, and when.
+-- status 'draft' | 'confirmed'; free-form strings, not ENUMs (no migrations).
+CREATE TABLE IF NOT EXISTS alphapulldown_targets (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  project_id BIGINT NOT NULL,
+  owner_id BIGINT NOT NULL,
+  name VARCHAR(255) NOT NULL DEFAULT '',
+  status VARCHAR(20) NOT NULL DEFAULT 'draft',
+  genome_upid VARCHAR(12) NULL,
+  genome_organism VARCHAR(255) NULL,
+  genome_tax_id INT NULL,
+  genome_json MEDIUMTEXT NULL,
+  model_source VARCHAR(20) NULL,
+  model_id VARCHAR(60) NULL,
+  model_version VARCHAR(60) NULL,
+  model_file VARCHAR(255) NULL,
+  model_filename VARCHAR(255) NULL,
+  model_sha256 CHAR(64) NULL,
+  model_bytes BIGINT NULL,
+  model_state VARCHAR(20) NULL,
+  model_json MEDIUMTEXT NULL,
+  model_mapping_json MEDIUMTEXT NULL,
+  model_fetched_at DATETIME NULL,
+  model_accepted_at DATETIME NULL,
+  validated_at DATETIME NULL,
+  chimera_json MEDIUMTEXT NULL,
+  confirmed_at DATETIME NULL,
+  confirmed_by BIGINT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_target_project (project_id),
+  KEY idx_target_owner (owner_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- The chains of a target. sequence is what is used (the user's own text is
+-- the golden rule); original_sequence is what UniProt had when the chain was
+-- started from an accession (NULL for a sequence the user brought), so the
+-- edits can be described. uniprot_json is the UniProt record as fetched: the
+-- release it came from and its date, organism, taxon, proteomes, entry and
+-- sequence versions. validation_* is the result of checking the chain against
+-- the chosen genome ('matched', 'not_matched' or 'not_checked', and how).
+CREATE TABLE IF NOT EXISTS alphapulldown_target_chains (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  target_id BIGINT NOT NULL,
+  position INT NOT NULL,
+  label VARCHAR(100) NOT NULL,
+  origin VARCHAR(12) NOT NULL DEFAULT 'sequence',
+  accession VARCHAR(30) NULL,
+  copies INT NOT NULL DEFAULT 1,
+  length INT NOT NULL,
+  sequence MEDIUMTEXT NOT NULL,
+  original_sequence MEDIUMTEXT NULL,
+  edit_kind VARCHAR(12) NULL,
+  edit_summary VARCHAR(500) NULL,
+  uniprot_json MEDIUMTEXT NULL,
+  validation_status VARCHAR(12) NULL,
+  validation_json MEDIUMTEXT NULL,
+  validated_at DATETIME NULL,
+  UNIQUE KEY uniq_target_label (target_id, label),
+  KEY idx_target_id (target_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- What happened to a target and when: saved, checked against the genome,
+-- model loaded or accepted, chimera acknowledged, confirmed. The dates the
+-- methods text needs, kept even when a later edit reopens the target.
+CREATE TABLE IF NOT EXISTS alphapulldown_target_events (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  target_id BIGINT NOT NULL,
+  user_id BIGINT NULL,
+  event VARCHAR(40) NOT NULL,
+  detail_json TEXT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_target_events (target_id, id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- A project owns one set of proteins and ties the three stages together
 -- (sequences -> MSA -> co-folding). project_number is per-owner sequential
 -- (1, 2, 3, ...), shown as "P<number>" and used to name the project's own

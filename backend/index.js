@@ -11,6 +11,7 @@ const buildSequenceRouter = require('./routes/sequenceRoutes');
 const buildMsaRouter = require('./routes/msaRoutes');
 const buildCofoldRouter = require('./routes/cofoldRoutes');
 const buildLibraryRouter = require('./routes/libraryRoutes');
+const buildTargetRouter = require('./routes/targetRoutes');
 const buildProvenanceRouter = require('./routes/provenanceRoutes');
 const buildSpeedRouter = require('./routes/speedRoutes');
 const buildPageAccessRouter = require('./routes/pageAccessRoutes');
@@ -24,6 +25,7 @@ module.exports = function register(coreApi) {
   router.use(buildSettingsRouter(moduleApi));
   router.use(buildProjectRouter(moduleApi));
   router.use(buildLibraryRouter(moduleApi));
+  router.use(buildTargetRouter(moduleApi));
   router.use(buildProvenanceRouter(moduleApi));
   router.use(buildSequenceRouter(moduleApi));
   router.use(buildMsaRouter(moduleApi));

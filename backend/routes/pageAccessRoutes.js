@@ -6,6 +6,8 @@
 const express = require('express');
 
 const KNOWN_PAGES = [
+  { key: 'target', label: 'Target' },
+  { key: 'baits', label: 'Baits' },
   { key: 'sequences', label: 'Sequences' },
   { key: 'library', label: 'Library' },
   { key: 'msa', label: 'Features (CPU)' },

@@ -98,6 +98,56 @@ async function fetchFasta(accessions) {
   return text;
 }
 
+// One UniProtKB entry, with what the Target tab records about it: the
+// sequence, organism, the proteomes it belongs to, a signal peptide range
+// (so the user can remove it), and the UniProt release the answer came from.
+// An isoform accession (P04637-2) keeps its own sequence, read from FASTA.
+async function fetchEntry(accession) {
+  const wanted = String(accession || '').trim().toUpperCase();
+  if (!ACCESSION.test(wanted)) throw new Error(`${accession} is not a UniProt accession`);
+  const isoform = /-\d+$/.test(wanted);
+  const res = await request(`${BASE}/uniprotkb/${wanted}.json`);
+  const entry = await res.json();
+  let sequence = (entry.sequence && entry.sequence.value) || '';
+  // A retired (inactive) entry is answered with 200 and no sequence.
+  if (!sequence && !isoform) {
+    const reason = entry.inactiveReason && entry.inactiveReason.inactiveReasonType ? ` (${String(entry.inactiveReason.inactiveReasonType).toLowerCase()})` : '';
+    throw new Error(`${wanted} is no longer an active UniProt entry${reason}`);
+  }
+  if (isoform) {
+    const fasta = await (await request(`${BASE}/uniprotkb/${wanted}.fasta`)).text();
+    sequence = fasta.split(/\r?\n/).filter(line => line && !line.startsWith('>')).join('').toUpperCase();
+  }
+  const description = entry.proteinDescription || {};
+  const name = (description.recommendedName && description.recommendedName.fullName && description.recommendedName.fullName.value)
+    || (description.submissionNames && description.submissionNames[0] && description.submissionNames[0].fullName.value)
+    || '';
+  const audit = entry.entryAudit || {};
+  const signal = isoform ? null : (entry.features || []).find(f => f.type === 'Signal' && f.location && f.location.start && f.location.end);
+  return {
+    accession: wanted,
+    entry: entry.uniProtkbId || '',
+    reviewed: /reviewed \(Swiss-Prot\)/.test(entry.entryType || ''),
+    isoform,
+    name,
+    gene: (entry.genes && entry.genes[0] && entry.genes[0].geneName && entry.genes[0].geneName.value) || '',
+    organism: (entry.organism && entry.organism.scientificName) || '',
+    taxId: (entry.organism && entry.organism.taxonId) || null,
+    sequence,
+    length: sequence.length,
+    md5: (entry.sequence && entry.sequence.md5) || '',
+    entryVersion: audit.entryVersion || null,
+    sequenceVersion: audit.sequenceVersion || null,
+    lastSequenceUpdate: audit.lastSequenceUpdateDate || '',
+    proteomes: (entry.uniProtKBCrossReferences || [])
+      .filter(ref => ref.database === 'Proteomes')
+      .map(ref => ({ upid: ref.id, component: ((ref.properties || []).find(p => p.key === 'Component') || {}).value || '' })),
+    signalPeptide: signal ? { start: signal.location.start.value, end: signal.location.end.value } : null,
+    release: res.headers.get('x-uniprot-release') || '',
+    releaseDate: res.headers.get('x-uniprot-release-date') || ''
+  };
+}
+
 function proteomeQuery(upid, reviewedOnly) {
   return `(proteome:${upid})${reviewedOnly ? ' AND (reviewed:true)' : ''}`;
 }
@@ -186,6 +236,7 @@ module.exports = {
   searchProteins,
   searchProteomes,
   fetchFasta,
+  fetchEntry,
   peekRelease,
   proteomeInfo,
   downloadProteome

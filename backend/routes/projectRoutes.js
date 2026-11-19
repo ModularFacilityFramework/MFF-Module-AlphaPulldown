@@ -12,6 +12,7 @@ const { msaProfile } = require('../services/speedProfiles');
 const { projectDir, isInside, MODULE_DIRNAME } = require('../services/projectPaths');
 const { findProject } = require('../services/projectAccess');
 const { loadSettings } = require('../services/settingsStore');
+const { deleteForProject: deleteTargetFor } = require('../services/targetService');
 
 module.exports = function buildRouter(coreApi) {
   const router = express.Router();
@@ -58,7 +59,8 @@ module.exports = function buildRouter(coreApi) {
     try {
       const rows = await conn.query(
         `SELECT p.id, p.project_number, p.name, p.mode, p.created_at,
-                (SELECT COUNT(*) FROM alphapulldown_project_sequences s WHERE s.project_id = p.id) AS sequence_count
+                (SELECT COUNT(*) FROM alphapulldown_project_sequences s WHERE s.project_id = p.id) AS sequence_count,
+                (SELECT t.status FROM alphapulldown_targets t WHERE t.project_id = p.id) AS target_status
          FROM alphapulldown_projects p WHERE p.owner_id = ? ORDER BY p.created_at DESC, p.id DESC`,
         [req.user.id]
       );
@@ -120,6 +122,7 @@ module.exports = function buildRouter(coreApi) {
 
       await conn.beginTransaction();
       await conn.query('DELETE FROM alphapulldown_project_sequences WHERE project_id = ?', [project.id]);
+      await deleteTargetFor(conn, project.id);
       await conn.query('DELETE FROM alphapulldown_projects WHERE id = ?', [project.id]);
       await conn.commit();
 

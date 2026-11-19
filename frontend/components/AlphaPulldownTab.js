@@ -9,8 +9,10 @@
 // guide is explicit that a module shouldn't add a second title on top of
 // either.
 //
-// A project (ProjectBar) owns one set of proteins and ties the three
-// pipeline tabs together: Sequences -> Features (CPU) -> Co-folding (GPU).
+// A project (ProjectBar) owns one target, one set of proteins and ties the
+// pipeline tabs together: Target -> Baits -> (Sequences ->) Features (CPU) ->
+// Co-folding (GPU). The Baits tab stays locked until the project's target is
+// confirmed.
 // The Library tab is not tied to a project: it is the proteomes and feature
 // sets every user shares. The
 // stats strip under the tab bar always describes the selected project.
@@ -23,6 +25,8 @@ import React, { useCallback, useEffect, useState } from 'react';
 import ProjectBar from './ProjectBar';
 import StatsStrip from './StatsStrip';
 import LibraryTab from './LibraryTab';
+import TargetTab from './TargetTab';
+import BaitsTab from './BaitsTab';
 import MsaTab from './MsaTab';
 import CofoldTab from './CofoldTab';
 import SequencesTab from './SequencesTab';
@@ -30,9 +34,22 @@ import SetupTab from './SetupTab';
 import SpeedTab from './SpeedTab';
 import PageAccessTab from './PageAccessTab';
 import styles from '../styles/AlphaPulldownTab.module.css';
+import targetStyles from '../styles/TargetTab.module.css';
 
 // stage: a pipeline tab (needs a selected project, shows the stats strip).
+// needsProject: a tab that needs a selected project but shows no stats strip.
+// lockedUntil: the tab is greyed out until this returns true for the project.
 const TABS = [
+  // Handles a missing project itself (staff still get the overview of every target).
+  { key: 'target', label: 'Target', component: TargetTab },
+  {
+    key: 'baits',
+    label: 'Baits',
+    needsProject: true,
+    component: BaitsTab,
+    lockedMessage: 'Confirm the target first',
+    isOpen: project => !!project && project.target_status === 'confirmed'
+  },
   { key: 'sequences', label: 'Sequences', stage: 'sequences', component: SequencesTab },
   { key: 'library', label: 'Library', component: LibraryTab },
   { key: 'msa', label: 'Features (CPU)', stage: 'msa', component: MsaTab },
@@ -112,12 +129,15 @@ function AlphaPulldownTab({ coreApi }) {
     visibleTabs.push({ key: 'page-access', label: 'Page Access', component: PageAccessTab });
   }
 
-  const currentTab = visibleTabs.find(t => t.key === activeTab) || visibleTabs[0];
+  const currentProject = projects.find(p => p.id === projectId) || null;
+  const isLocked = tab => !!tab.isOpen && !tab.isOpen(currentProject);
+  // A locked tab cannot be the current one: fall back to the first open tab.
+  const requested = visibleTabs.find(t => t.key === activeTab);
+  const currentTab = (requested && !isLocked(requested) ? requested : visibleTabs.find(t => !isLocked(t))) || visibleTabs[0];
   if (!currentTab) return <div className={styles.loading}>You don&apos;t have access to any tab in this module.</div>;
 
   const ActiveComponent = currentTab.component;
-  const currentProject = projects.find(p => p.id === projectId) || null;
-  const needsProject = !!currentTab.stage;
+  const needsProject = !!currentTab.stage || !!currentTab.needsProject;
   const stats = statsState.projectId === projectId ? statsState.data : null;
 
   return (
@@ -132,24 +152,37 @@ function AlphaPulldownTab({ coreApi }) {
       {loadError && <p className={styles.error}>{loadError}</p>}
 
       <div className={styles.tabBar}>
-        {visibleTabs.map(tab => (
-          <button
-            key={tab.key}
-            type="button"
-            className={tab.key === currentTab.key ? `${styles.tabButton} ${styles.tabButtonActive}` : styles.tabButton}
-            onClick={() => setActiveTab(tab.key)}
-          >
-            {tab.label}
-          </button>
-        ))}
+        {visibleTabs.map(tab => {
+          const locked = isLocked(tab);
+          const classes = [styles.tabButton, tab.key === currentTab.key ? styles.tabButtonActive : '', locked ? targetStyles.tabLocked : ''];
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              className={classes.filter(Boolean).join(' ')}
+              onClick={() => { if (!locked) setActiveTab(tab.key); }}
+              aria-disabled={locked}
+              title={locked ? tab.lockedMessage : undefined}
+            >
+              {locked ? `${tab.label} (locked)` : tab.label}
+            </button>
+          );
+        })}
       </div>
 
       <div className={styles.content}>
-        {needsProject && currentProject && <StatsStrip stats={stats} stage={currentTab.stage} />}
+        {!!currentTab.stage && currentProject && <StatsStrip stats={stats} stage={currentTab.stage} />}
         {needsProject && !currentProject ? (
           <div className={styles.empty}>Create a project above to begin.</div>
         ) : (
-          <ActiveComponent coreApi={coreApi} stage={currentTab.stage} project={currentProject} onChanged={handleChanged} />
+          <ActiveComponent
+            coreApi={coreApi}
+            stage={currentTab.stage}
+            project={currentProject}
+            onChanged={handleChanged}
+            isStaff={canManageUsers}
+            onNavigate={setActiveTab}
+          />
         )}
       </div>
     </div>
