@@ -29,8 +29,8 @@ function StaffOverview({ api, onOpen }) {
             <thead><tr><th /><th>Owner</th><th>Project</th><th>Target</th><th>Status</th><th>Genome</th><th className={shared.numeric}>Chains</th><th className={shared.numeric}>Not confirmed</th><th>Updated</th></tr></thead>
             <tbody>
               {targets.map(t => (
-                <tr key={t.projectId}>
-                  <td><button type="button" className={shared.btnBlue} onClick={() => onOpen(t.projectId)}>View</button></td>
+                <tr key={t.targetId}>
+                  <td><button type="button" className={shared.btnBlue} onClick={() => onOpen(t)}>View</button></td>
                   <td>{t.ownerName || t.ownerId}</td>
                   <td>{`P${t.projectNumber} - ${t.projectName}`}</td>
                   <td>{t.name}</td>
@@ -49,22 +49,42 @@ function StaffOverview({ api, onOpen }) {
   );
 }
 
-function TargetTab({ coreApi, project, onChanged, isStaff }) {
-  // A staff member who opened somebody else's target (project id) from the
-  // overview; null = the selected project's own target.
+// targetId: the selected target of the project (a number), or 'new' for a
+// target that has not been saved yet. onSaved(id) is called when a new target
+// has just been saved; onChanged() after any other change.
+function TargetTab({ coreApi, project, targetId, onChanged, onSaved, isStaff }) {
+  // A staff member who opened somebody else's target from the overview;
+  // null = the selected project's own target.
   const [viewing, setViewing] = useState(null);
   const projectId = project ? project.id : null;
 
   useEffect(() => { setViewing(null); }, [projectId]);
 
   if (viewing) {
-    return <TargetEditor key={`view-${viewing}`} coreApi={coreApi} projectId={viewing} onBack={() => setViewing(null)} />;
+    return (
+      <TargetEditor
+        key={`view-${viewing.targetId}`}
+        coreApi={coreApi}
+        projectId={viewing.projectId}
+        targetId={viewing.targetId}
+        onBack={() => setViewing(null)}
+      />
+    );
   }
   return (
     <div>
       {project
-        ? <TargetEditor key={project.id} coreApi={coreApi} projectId={project.id} onChanged={onChanged} />
-        : <div className={shared.empty}>Create a project above to define its target.</div>}
+        ? (
+          <TargetEditor
+            key={`${project.id}-${targetId}`}
+            coreApi={coreApi}
+            projectId={project.id}
+            targetId={typeof targetId === 'number' ? targetId : null}
+            onChanged={onChanged}
+            onSaved={onSaved}
+          />
+        )
+        : <div className={shared.empty}>Create a project above to define its targets.</div>}
       {isStaff && <StaffOverview api={coreApi.api} onOpen={setViewing} />}
     </div>
   );

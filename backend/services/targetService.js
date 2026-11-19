@@ -110,8 +110,8 @@ function describeTarget(row, chainRows, eventRows = []) {
   return target;
 }
 
-async function findByProject(conn, projectId) {
-  const rows = await conn.query('SELECT * FROM alphapulldown_targets WHERE project_id = ?', [projectId]);
+async function findById(conn, id) {
+  const rows = await conn.query('SELECT * FROM alphapulldown_targets WHERE id = ?', [id]);
   return rows[0] || null;
 }
 
@@ -130,7 +130,7 @@ async function addEvent(conn, targetId, userId, event, detail) {
   );
 }
 
-// Writes the draft: the target row (created on first save) and its chains,
+// Writes the draft: the target row (created when `existing` is null) and its chains,
 // replacing the previous chains (their genome checks are redone by the
 // caller). `chains` carry what the route worked out: normalised input plus
 // originalSequence, edit and uniprot. `genome` is { upid, organism, taxId,
@@ -138,8 +138,7 @@ async function addEvent(conn, targetId, userId, event, detail) {
 // and loses its chimera acknowledgement - the caller sets it when the chains
 // or the genome changed; a name-only change leaves the target as it is.
 // Returns { id, existed }.
-async function saveDraft(conn, { project, name, chains, genome, reopen }) {
-  const existing = await findByProject(conn, project.id);
+async function saveDraft(conn, { project, existing, name, chains, genome, reopen }) {
   const genomeValues = [genome ? genome.upid : null, genome ? genome.organism : null, genome ? genome.taxId : null, genome ? JSON.stringify(genome.detail) : null];
   let targetId;
   if (existing) {
@@ -229,24 +228,48 @@ async function validateTarget(conn, targetRow, userId) {
   return loadFull(conn, fresh);
 }
 
-// Everything a project's removal must remove with it.
+async function deleteTarget(conn, targetId) {
+  await conn.query('DELETE FROM alphapulldown_target_events WHERE target_id = ?', [targetId]);
+  await conn.query('DELETE FROM alphapulldown_target_chains WHERE target_id = ?', [targetId]);
+  await conn.query('DELETE FROM alphapulldown_targets WHERE id = ?', [targetId]);
+}
+
+// Everything a project's removal must remove with it: all its targets.
 async function deleteForProject(conn, projectId) {
-  const row = await findByProject(conn, projectId);
-  if (!row) return;
-  await conn.query('DELETE FROM alphapulldown_target_events WHERE target_id = ?', [row.id]);
-  await conn.query('DELETE FROM alphapulldown_target_chains WHERE target_id = ?', [row.id]);
-  await conn.query('DELETE FROM alphapulldown_targets WHERE id = ?', [row.id]);
+  const rows = await conn.query('SELECT id FROM alphapulldown_targets WHERE project_id = ?', [projectId]);
+  for (const row of rows) await deleteTarget(conn, row.id);
+}
+
+// The project's targets in short, for the target selector and the locks.
+async function listForProject(conn, projectId) {
+  const rows = await conn.query(
+    `SELECT t.id, t.name, t.status, t.genome_organism, t.genome_upid, t.updated_at, t.confirmed_at,
+            (SELECT COUNT(*) FROM alphapulldown_target_chains c WHERE c.target_id = t.id) AS chain_count
+     FROM alphapulldown_targets t WHERE t.project_id = ? ORDER BY t.id`,
+    [projectId]
+  );
+  return rows.map(r => ({
+    id: Number(r.id),
+    name: r.name,
+    status: r.status,
+    genome: r.genome_upid ? `${r.genome_organism || ''} (${r.genome_upid})`.trim() : '',
+    chains: Number(r.chain_count),
+    updatedAt: r.updated_at,
+    confirmedAt: r.confirmed_at
+  }));
 }
 
 module.exports = {
   parseJson,
   signatureOf,
   describeTarget,
-  findByProject,
+  findById,
   loadFull,
   addEvent,
   saveDraft,
   validateTarget,
   libraryVersionFor,
-  deleteForProject
+  deleteTarget,
+  deleteForProject,
+  listForProject
 };

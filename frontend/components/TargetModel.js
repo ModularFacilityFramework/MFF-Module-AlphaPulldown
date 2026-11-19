@@ -20,7 +20,7 @@ function when(value) {
   return value ? new Date(value).toLocaleString('en-GB') : '';
 }
 
-function TargetModel({ api, projectId, canChange, model, firstAccession, readOnly, onPayload }) {
+function TargetModel({ api, targetId, canChange, model, firstAccession, readOnly, onPayload }) {
   const [pdbId, setPdbId] = useState('');
   const [afAccession, setAfAccession] = useState('');
   const [uploadSource, setUploadSource] = useState('upload');
@@ -37,7 +37,7 @@ function TargetModel({ api, projectId, canChange, model, firstAccession, readOnl
       .finally(() => setBusy(''));
   }
 
-  const base = `/alphapulldown/projects/${projectId}/target/model`;
+  const base = `/alphapulldown/targets/${targetId}/model`;
 
   function upload(e) {
     const file = e.target.files && e.target.files[0];

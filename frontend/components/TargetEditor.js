@@ -1,4 +1,4 @@
-// The Target tab for one project: define the target (one chain or many), say
+// The Target tab for one target of a project: define the target (one chain or many), say
 // which genome it comes from, optionally attach a 3D model, and confirm.
 // Everything is saved as a draft whether or not it is validated; the Baits
 // tab opens only once the target is confirmed. The owner edits; a developer
@@ -67,7 +67,8 @@ function draftFrom(payload) {
   return { name: target.name, chains: target.chains.map(chainFromSaved), genome: target.genome };
 }
 
-function TargetEditor({ coreApi, projectId, onChanged, onBack }) {
+// targetId null = a new target that has not been saved yet.
+function TargetEditor({ coreApi, projectId, targetId, onChanged, onSaved, onBack }) {
   const { api } = coreApi;
   const [payload, setPayload] = useState(null);
   const [draft, setDraft] = useState(null);
@@ -80,20 +81,28 @@ function TargetEditor({ coreApi, projectId, onChanged, onBack }) {
 
   useEffect(() => () => { mounted.current = false; }, []);
 
-  const apply = useCallback(data => {
+  const apply = useCallback((data, created) => {
     const next = draftFrom(data);
     setPayload(data);
     setDraft(next);
     setSaved(snapshotOf(next));
     setAcknowledged(false);
-    if (onChanged) onChanged();
-  }, [onChanged]);
+    if (created && onSaved) onSaved(data.target.id);
+    else if (onChanged) onChanged();
+  }, [onChanged, onSaved]);
 
   useEffect(() => {
     setPayload(null);
     setDraft(null);
     setError('');
-    api.get(`/alphapulldown/projects/${projectId}/target`)
+    // A new target starts blank; the project's own record gives its name
+    // and the chimera warning text.
+    const request = targetId
+      ? api.get(`/alphapulldown/targets/${targetId}`)
+      : api.get(`/alphapulldown/projects/${projectId}/targets`).then(res => ({
+        data: { project: res.data.project, readOnly: false, ownerName: '', target: null, chimeraWarning: res.data.chimeraWarning }
+      }));
+    request
       .then(res => {
         const next = draftFrom(res.data);
         setPayload(res.data);
@@ -101,7 +110,7 @@ function TargetEditor({ coreApi, projectId, onChanged, onBack }) {
         setSaved(snapshotOf(next));
       })
       .catch(err => setError(err.response?.data?.error || err.message));
-  }, [api, projectId]);
+  }, [api, projectId, targetId]);
 
   if (error && !payload) return <p className={shared.errorText}>{error}</p>;
   if (!payload || !draft) return <div className={shared.empty}>Loading...</div>;
@@ -109,14 +118,14 @@ function TargetEditor({ coreApi, projectId, onChanged, onBack }) {
   const readOnly = payload.readOnly;
   const target = payload.target;
   const dirty = snapshotOf(draft) !== saved;
-  const base = `/alphapulldown/projects/${projectId}/target`;
+  const base = target ? `/alphapulldown/targets/${target.id}` : null;
   const unsavedChains = draft.chains.filter(c => c.origin === 'uniprot' && c.accession.trim() && !c.sequence.trim()).length;
 
-  function run(label, request) {
+  function run(label, request, created = false) {
     setBusy(label);
     setError('');
     return request()
-      .then(res => { apply(res.data); return res.data; })
+      .then(res => { apply(res.data, created); return res.data; })
       .catch(err => { setError(err.response?.data?.error || err.message); return null; })
       .finally(() => { if (mounted.current) setBusy(''); });
   }
@@ -126,7 +135,7 @@ function TargetEditor({ coreApi, projectId, onChanged, onBack }) {
   }
 
   function save() {
-    run('save', () => api.put(base, {
+    const body = {
       name: draft.name.trim(),
       chains: draft.chains.map(c => ({
         origin: c.origin,
@@ -136,7 +145,9 @@ function TargetEditor({ coreApi, projectId, onChanged, onBack }) {
         label: c.label
       })),
       genome: draft.genome ? { upid: draft.genome.upid, input: draft.genome.input || '', via: draft.genome.via || 'search' } : null
-    }));
+    };
+    if (target) run('save', () => api.put(base, body));
+    else run('save', () => api.post(`/alphapulldown/projects/${projectId}/targets`, body), true);
   }
 
   function addToLibrary() {
@@ -242,7 +253,7 @@ function TargetEditor({ coreApi, projectId, onChanged, onBack }) {
         </p>
         <TargetModel
           api={api}
-          projectId={projectId}
+          targetId={target ? target.id : null}
           canChange={!!target && !dirty}
           model={target ? target.model : null}
           firstAccession={firstAccession}

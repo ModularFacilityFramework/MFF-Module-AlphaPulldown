@@ -125,8 +125,8 @@ CREATE TABLE IF NOT EXISTS alphapulldown_library_feature_sets (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- The Target tab. A target is the protein (one chain) or complex (several
--- chains) the user is interested in; there is at most one per project, and
--- only its owner sees it (developers and administrators may read all).
+-- chains) the user is interested in; a project holds one or many, and
+-- only its owner sees them (developers and administrators may read all).
 -- It is saved as a draft whether or not it is validated or confirmed; the
 -- Baits tab opens only once status is 'confirmed'.
 --   genome_*     the UniProt proteome the user chose as the source organism's
@@ -169,7 +169,7 @@ CREATE TABLE IF NOT EXISTS alphapulldown_targets (
   confirmed_by BIGINT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  UNIQUE KEY uniq_target_project (project_id),
+  KEY idx_target_project (project_id),
   KEY idx_target_owner (owner_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 

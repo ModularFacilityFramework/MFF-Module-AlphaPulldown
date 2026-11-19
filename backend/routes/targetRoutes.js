@@ -1,5 +1,6 @@
 // The Target tab's backend. A target (one chain or several, the protein the
-// user is interested in) belongs to one project and one owner. Only the
+// user is interested in) belongs to one project and one owner; a project
+// holds one or many targets. Only the
 // owner sees or changes it; developers and administrators may READ every
 // target (never change it). Everything this module needs from core comes
 // through coreApi (see docs/MFF-Core_module-core-api.md).
@@ -21,7 +22,7 @@ const { projectDir, isInside, MODULE_DIRNAME } = require('../services/projectPat
 const { httpError } = require('../services/routeHelpers');
 
 const STAFF_ROLES = ['developer', 'administrator'];
-const MODEL_DIRNAME = 'target';
+const TARGETS_DIRNAME = 'targets';
 const MODEL_STORE_SOURCES = ['pdb', 'alphafold_db'];
 const UPLOAD_SOURCES = ['upload', 'abcfold'];
 const GENOME_VIA = ['search', 'suggestion', 'upid'];
@@ -88,21 +89,28 @@ module.exports = function buildRouter(coreApi) {
     }
   }
 
-  // The project behind a request. The owner may read and write; a developer
-  // or administrator may read; anyone else is told it does not exist.
-  async function accessProject(conn, req, { write = false } = {}) {
-    const rows = await conn.query('SELECT * FROM alphapulldown_projects WHERE id = ?', [req.params.id]);
-    const project = rows[0];
-    if (!project) throw httpError(404, 'Project not found');
+  // Who may do what: the owner reads and writes; a developer or
+  // administrator reads; anyone else is told it does not exist.
+  function allow(project, req, write) {
     const owner = Number(project.owner_id) === Number(req.user.id);
-    if (!owner && (write || !isStaff(req))) throw httpError(404, 'Project not found');
-    return { project, owner };
+    if (!owner && (write || !isStaff(req))) throw httpError(404, 'Not found');
+    return owner;
   }
 
-  async function requireTarget(conn, project) {
-    const row = await service.findByProject(conn, project.id);
-    if (!row) throw httpError(404, 'Save the target first.');
-    return row;
+  // The project named by :id in the path.
+  async function accessProject(conn, req, { write = false } = {}) {
+    const rows = await conn.query('SELECT * FROM alphapulldown_projects WHERE id = ?', [req.params.id]);
+    if (!rows[0]) throw httpError(404, 'Project not found');
+    return { project: rows[0], owner: allow(rows[0], req, write) };
+  }
+
+  // The target named by :tid in the path, with its project.
+  async function accessTarget(conn, req, { write = false } = {}) {
+    const row = await service.findById(conn, req.params.tid);
+    if (!row) throw httpError(404, 'Target not found');
+    const projects = await conn.query('SELECT * FROM alphapulldown_projects WHERE id = ?', [row.project_id]);
+    if (!projects[0]) throw httpError(404, 'Target not found');
+    return { row, project: projects[0], owner: allow(projects[0], req, write) };
   }
 
   async function ownerName(ownerId) {
@@ -128,10 +136,10 @@ module.exports = function buildRouter(coreApi) {
     };
   }
 
-  async function workspaceDir(req, project) {
+  async function workspaceDir(req, project, targetId) {
     const workspace = await coreApi.getUserWorkspacePath(req.user);
     if (!workspace.active) throw httpError(503, 'Workspace storage is not available for this user.');
-    const dir = path.join(projectDir(workspace.path, project.project_number), MODEL_DIRNAME);
+    const dir = path.join(projectDir(workspace.path, project.project_number), TARGETS_DIRNAME, `T${Number(targetId)}`);
     if (!isInside(path.join(workspace.path, MODULE_DIRNAME), dir)) throw httpError(500, 'Model folder is outside the workspace.');
     return dir;
   }
@@ -174,36 +182,45 @@ module.exports = function buildRouter(coreApi) {
     });
   }));
 
-  // ---- the target ---------------------------------------------------------------
+  // ---- the targets of a project ----------------------------------------------------
 
-  // GET /api/alphapulldown/projects/:id/target
-  router.get('/projects/:id/target', auth, handle('Failed to read the target', async (req, res) => {
+  // GET /api/alphapulldown/projects/:id/targets - the project's targets in
+  // short (for the selector and the locks of the later tabs).
+  router.get('/projects/:id/targets', auth, handle('Failed to list the targets', async (req, res) => {
     res.json(await db(async conn => {
       const { project, owner } = await accessProject(conn, req);
-      return view(conn, project, owner, await service.findByProject(conn, project.id));
+      return {
+        project: { id: Number(project.id), number: project.project_number, name: project.name },
+        readOnly: !owner,
+        targets: await service.listForProject(conn, project.id),
+        chimeraWarning: rules.CHIMERA_WARNING
+      };
     }));
   }));
 
-  // PUT /api/alphapulldown/projects/:id/target
-  //   { name, chains: [{ origin, accession, sequence, copies, label }], genome: { upid, input, via } | null }
-  // Saves the draft whether or not anything is valid yet, then checks the
-  // chains against the genome.
-  router.put('/projects/:id/target', auth, handle('Failed to save the target', async (req, res) => {
+  // GET /api/alphapulldown/targets/:tid
+  router.get('/targets/:tid', auth, handle('Failed to read the target', async (req, res) => {
+    res.json(await db(async conn => {
+      const { row, project, owner } = await accessTarget(conn, req);
+      return view(conn, project, owner, row);
+    }));
+  }));
+
+  // Saves a target from { name, chains: [{ origin, accession, sequence, copies,
+  // label }], genome: { upid, input, via } | null }: a new one in `project`
+  // when `existingRow` is null, else the existing one. A draft is kept
+  // whether or not anything is valid yet; the chains are then checked against
+  // the genome.
+  async function saveTarget(req, project, existingRow) {
     const body = req.body || {};
     const { chains: normalized, errors } = rules.normalizeChains(body.chains);
     if (errors.length > 0) throw Object.assign(httpError(400, errors.join(' ')), { details: errors });
     const name = typeof body.name === 'string' ? body.name.trim().slice(0, 255) : '';
+    const existing = existingRow ? await db(conn => service.loadFull(conn, existingRow)) : null;
 
     // The user's own sequence is what is used. For a chain started from an
     // accession, what UniProt had (sequence, release, organism...) is kept
     // beside it, so the edits can be described and the source cited.
-    const first = await db(async conn => {
-      const { project } = await accessProject(conn, req, { write: true });
-      const row = await service.findByProject(conn, project.id);
-      return { project, existing: row ? await service.loadFull(conn, row) : null };
-    });
-    const { project, existing } = first;
-
     const fetched = new Map();
     const chains = [];
     for (const chain of normalized) {
@@ -258,11 +275,11 @@ module.exports = function buildRouter(coreApi) {
       && service.signatureOf({ chains: existing.chains, genomeUpid: existing.genome && existing.genome.upid })
         !== service.signatureOf({ chains, genomeUpid: genome && genome.upid });
 
-    res.json(await db(async conn => {
+    return db(async conn => {
       await conn.beginTransaction();
       let saved;
       try {
-        saved = await service.saveDraft(conn, { project, name: name || project.name, chains, genome, reopen: reopened });
+        saved = await service.saveDraft(conn, { project, existing: existingRow, name: name || project.name, chains, genome, reopen: reopened });
         await service.addEvent(conn, saved.id, req.user.id, 'saved', {
           chains: chains.map(c => ({ label: c.label, origin: c.origin, accession: c.accession, length: c.sequence.length, copies: c.copies, edit: c.edit.kind })),
           genome: genome ? genome.upid : null
@@ -273,31 +290,50 @@ module.exports = function buildRouter(coreApi) {
         await conn.rollback();
         throw err;
       }
-      const row = await service.findByProject(conn, project.id);
-      await service.validateTarget(conn, row, req.user.id);
-      return view(conn, project, true, await service.findByProject(conn, project.id));
-    }));
+      await service.validateTarget(conn, await service.findById(conn, saved.id), req.user.id);
+      return view(conn, project, true, await service.findById(conn, saved.id));
+    });
+  }
+
+  // POST /api/alphapulldown/projects/:id/targets - a new target in the project
+  router.post('/projects/:id/targets', auth, handle('Failed to save the target', async (req, res) => {
+    const project = await db(async conn => (await accessProject(conn, req, { write: true })).project);
+    res.status(201).json(await saveTarget(req, project, null));
   }));
 
-  // POST /api/alphapulldown/projects/:id/target/validate - check again, for
-  // example after the genome's proteome was added to the library.
-  router.post('/projects/:id/target/validate', auth, handle('Failed to check the target', async (req, res) => {
+  // PUT /api/alphapulldown/targets/:tid
+  router.put('/targets/:tid', auth, handle('Failed to save the target', async (req, res) => {
+    const { row, project } = await db(conn => accessTarget(conn, req, { write: true }));
+    res.json(await saveTarget(req, project, row));
+  }));
+
+  // DELETE /api/alphapulldown/targets/:tid - the target, its history and its
+  // model file.
+  router.delete('/targets/:tid', auth, handle('Failed to delete the target', async (req, res) => {
+    const { row, project } = await db(conn => accessTarget(conn, req, { write: true }));
+    await db(conn => service.deleteTarget(conn, row.id));
+    const dir = await workspaceDir(req, project, row.id).catch(() => null);
+    if (dir) await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+    res.json({ success: true });
+  }));
+
+  // POST /api/alphapulldown/targets/:tid/validate - check again, for example
+  // after the genome's proteome was added to the library.
+  router.post('/targets/:tid/validate', auth, handle('Failed to check the target', async (req, res) => {
     res.json(await db(async conn => {
-      const { project } = await accessProject(conn, req, { write: true });
-      const row = await requireTarget(conn, project);
+      const { row, project } = await accessTarget(conn, req, { write: true });
       await service.validateTarget(conn, row, req.user.id);
-      return view(conn, project, true, await service.findByProject(conn, project.id));
+      return view(conn, project, true, await service.findById(conn, row.id));
     }));
   }));
 
-  // POST /api/alphapulldown/projects/:id/target/confirm - { acknowledgeChimera }
+  // POST /api/alphapulldown/targets/:tid/confirm - { acknowledgeChimera }
   // Checks the chains once more, then confirms. A chimeric complex is
   // confirmed only with the user's explicit acknowledgement of the warning.
-  router.post('/projects/:id/target/confirm', auth, handle('Failed to confirm the target', async (req, res) => {
+  router.post('/targets/:tid/confirm', auth, handle('Failed to confirm the target', async (req, res) => {
     const acknowledge = !!(req.body && req.body.acknowledgeChimera);
     res.json(await db(async conn => {
-      const { project } = await accessProject(conn, req, { write: true });
-      const row = await requireTarget(conn, project);
+      const { row, project } = await accessTarget(conn, req, { write: true });
       const target = await service.validateTarget(conn, row, req.user.id);
       if (target.problems.length > 0) throw Object.assign(httpError(400, target.problems.join(' ')), { details: target.problems });
       let chimera = null;
@@ -318,7 +354,7 @@ module.exports = function buildRouter(coreApi) {
         unconfirmedChains: target.chimera.flagged ? target.chimera.chains : [],
         model: target.model ? { source: target.model.source, id: target.model.modelId, version: target.model.version } : null
       });
-      return view(conn, project, true, await service.findByProject(conn, project.id));
+      return view(conn, project, true, await service.findById(conn, row.id));
     }));
   }));
 
@@ -326,7 +362,7 @@ module.exports = function buildRouter(coreApi) {
 
   // Reads, stores and records a model that is now this target's selected
   // model. The previous model (if any) is replaced.
-  async function setModel(req, project, { text, source, filename }) {
+  async function setModel(req, project, row, { text, source, filename }) {
     let model;
     try {
       model = await readModel(text);
@@ -334,13 +370,13 @@ module.exports = function buildRouter(coreApi) {
       throw httpError(400, err.message);
     }
     const sha256 = crypto.createHash('sha256').update(text).digest('hex');
-    const dir = await workspaceDir(req, project);
+    const dir = await workspaceDir(req, project, row.id);
     const file = `model.${model.format === 'pdb' ? 'pdb' : 'cif'}`;
     await fs.mkdir(dir, { recursive: true });
     await fs.rm(path.join(dir, 'model.cif'), { force: true });
     await fs.rm(path.join(dir, 'model.pdb'), { force: true });
     await fs.writeFile(path.join(dir, file), text);
-    const relative = path.posix.join(MODEL_DIRNAME, file);
+    const relative = path.posix.join(TARGETS_DIRNAME, `T${Number(row.id)}`, file);
     const version = source.version || model.revisionDate || '';
     const detail = {
       format: model.format,
@@ -354,7 +390,6 @@ module.exports = function buildRouter(coreApi) {
       chains: model.chains
     };
     return db(async conn => {
-      const row = await requireTarget(conn, project);
       await conn.query(
         `UPDATE alphapulldown_targets SET model_source = ?, model_id = ?, model_version = ?, model_file = ?, model_filename = ?,
            model_sha256 = ?, model_bytes = ?, model_state = 'selected', model_json = ?, model_mapping_json = NULL,
@@ -365,48 +400,39 @@ module.exports = function buildRouter(coreApi) {
       await service.addEvent(conn, row.id, req.user.id, 'model_loaded', {
         source: source.source, id: source.modelId || model.entryId, version, filename: filename || null, sha256, chains: model.chains.length
       });
-      return view(conn, project, true, await service.findByProject(conn, project.id));
+      return view(conn, project, true, await service.findById(conn, row.id));
     });
   }
 
-  // POST /api/alphapulldown/projects/:id/target/model/fetch - { source: 'pdb' | 'alphafold_db', id }
-  router.post('/projects/:id/target/model/fetch', auth, handle('Failed to fetch the model', async (req, res) => {
+  // POST /api/alphapulldown/targets/:tid/model/fetch - { source: 'pdb' | 'alphafold_db', id }
+  router.post('/targets/:tid/model/fetch', auth, handle('Failed to fetch the model', async (req, res) => {
     const body = req.body || {};
     if (!MODEL_STORE_SOURCES.includes(body.source)) throw httpError(400, `source must be one of ${MODEL_STORE_SOURCES.join(', ')}`);
-    const project = await db(async conn => {
-      const found = (await accessProject(conn, req, { write: true })).project;
-      await requireTarget(conn, found);
-      return found;
-    });
+    const { row, project } = await db(conn => accessTarget(conn, req, { write: true }));
     let fetched;
     try {
       fetched = body.source === 'pdb' ? await modelSources.fetchPdb(body.id) : await modelSources.fetchAlphafold(body.id);
     } catch (err) {
       throw httpError(err.status || 502, err.message);
     }
-    res.json(await setModel(req, project, { text: fetched.text, source: fetched.source, filename: '' }));
+    res.json(await setModel(req, project, row, { text: fetched.text, source: fetched.source, filename: '' }));
   }));
 
-  // POST /api/alphapulldown/projects/:id/target/model/upload?filename=&source=upload|abcfold
+  // POST /api/alphapulldown/targets/:tid/model/upload?filename=&source=upload|abcfold
   // The body is the mmCIF or PDB text itself (Content-Type: text/plain).
-  router.post('/projects/:id/target/model/upload', auth, express.text({ type: () => true, limit: '60mb' }), handle('Failed to read the model', async (req, res) => {
+  router.post('/targets/:tid/model/upload', auth, express.text({ type: () => true, limit: '60mb' }), handle('Failed to read the model', async (req, res) => {
     const source = UPLOAD_SOURCES.includes(req.query.source) ? req.query.source : 'upload';
     if (typeof req.body !== 'string' || !req.body.trim()) throw httpError(400, 'The model file is empty.');
-    const project = await db(async conn => {
-      const found = (await accessProject(conn, req, { write: true })).project;
-      await requireTarget(conn, found);
-      return found;
-    });
-    res.json(await setModel(req, project, { text: req.body, source: { source }, filename: safeFilename(req.query.filename) }));
+    const { row, project } = await db(conn => accessTarget(conn, req, { write: true }));
+    res.json(await setModel(req, project, row, { text: req.body, source: { source }, filename: safeFilename(req.query.filename) }));
   }));
 
-  // POST /api/alphapulldown/projects/:id/target/model/accept - the user has
-  // looked at how the model matches the chains and chooses it. The match is
-  // recorded as it stood.
-  router.post('/projects/:id/target/model/accept', auth, handle('Failed to accept the model', async (req, res) => {
+  // POST /api/alphapulldown/targets/:tid/model/accept - the user has looked
+  // at how the model matches the chains and chooses it. The match is recorded
+  // as it stood.
+  router.post('/targets/:tid/model/accept', auth, handle('Failed to accept the model', async (req, res) => {
     res.json(await db(async conn => {
-      const { project } = await accessProject(conn, req, { write: true });
-      const row = await requireTarget(conn, project);
+      const { row, project } = await accessTarget(conn, req, { write: true });
       if (!row.model_source) throw httpError(400, 'There is no model to accept.');
       const target = await service.loadFull(conn, row);
       await conn.query(
@@ -414,16 +440,15 @@ module.exports = function buildRouter(coreApi) {
         [JSON.stringify({ covers: target.model.covers, mapping: target.model.mapping }), row.id]
       );
       await service.addEvent(conn, row.id, req.user.id, 'model_accepted', { covers: target.model.covers, mapping: target.model.mapping });
-      return view(conn, project, true, await service.findByProject(conn, project.id));
+      return view(conn, project, true, await service.findById(conn, row.id));
     }));
   }));
 
-  // DELETE /api/alphapulldown/projects/:id/target/model
-  router.delete('/projects/:id/target/model', auth, handle('Failed to remove the model', async (req, res) => {
-    const project = await db(async conn => (await accessProject(conn, req, { write: true })).project);
-    const dir = await workspaceDir(req, project).catch(() => null);
+  // DELETE /api/alphapulldown/targets/:tid/model
+  router.delete('/targets/:tid/model', auth, handle('Failed to remove the model', async (req, res) => {
+    const { row, project } = await db(conn => accessTarget(conn, req, { write: true }));
+    const dir = await workspaceDir(req, project, row.id).catch(() => null);
     res.json(await db(async conn => {
-      const row = await requireTarget(conn, project);
       if (!row.model_source) throw httpError(400, 'There is no model to remove.');
       await conn.query(
         `UPDATE alphapulldown_targets SET model_source = NULL, model_id = NULL, model_version = NULL, model_file = NULL, model_filename = NULL,
@@ -437,7 +462,7 @@ module.exports = function buildRouter(coreApi) {
         await fs.rm(path.join(dir, 'model.cif'), { force: true });
         await fs.rm(path.join(dir, 'model.pdb'), { force: true });
       }
-      return view(conn, project, true, await service.findByProject(conn, project.id));
+      return view(conn, project, true, await service.findById(conn, row.id));
     }));
   }));
 
@@ -462,6 +487,7 @@ module.exports = function buildRouter(coreApi) {
     }
     res.json({
       targets: rows.map(r => ({
+        targetId: Number(r.id),
         projectId: Number(r.project_id),
         projectNumber: r.project_number,
         projectName: r.project_name,

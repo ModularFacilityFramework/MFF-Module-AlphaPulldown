@@ -8,10 +8,10 @@ const express = require('express');
 const KNOWN_PAGES = [
   { key: 'target', label: 'Target' },
   { key: 'baits', label: 'Baits' },
-  { key: 'sequences', label: 'Sequences' },
+  { key: 'alphapulldown', label: 'AlphaPulldown' },
+  { key: 'modelling', label: 'Modelling (ABCFold)' },
+  { key: 'summary', label: 'Summary' },
   { key: 'library', label: 'Library' },
-  { key: 'msa', label: 'Features (CPU)' },
-  { key: 'cofold', label: 'Co-folding (GPU)' },
   { key: 'setup', label: 'Setup' }
 ];
 

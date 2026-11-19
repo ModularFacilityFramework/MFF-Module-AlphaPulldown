@@ -60,7 +60,7 @@ module.exports = function buildRouter(coreApi) {
       const rows = await conn.query(
         `SELECT p.id, p.project_number, p.name, p.mode, p.created_at,
                 (SELECT COUNT(*) FROM alphapulldown_project_sequences s WHERE s.project_id = p.id) AS sequence_count,
-                (SELECT t.status FROM alphapulldown_targets t WHERE t.project_id = p.id) AS target_status
+                (SELECT COUNT(*) FROM alphapulldown_targets t WHERE t.project_id = p.id) AS target_count
          FROM alphapulldown_projects p WHERE p.owner_id = ? ORDER BY p.created_at DESC, p.id DESC`,
         [req.user.id]
       );
