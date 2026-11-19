@@ -1,26 +1,18 @@
-// Whole-proteome source: find a proteome on UniProt, download it once into
-// the user's workspace, then browse and filter it here and add chosen
-// proteins - or everything matching the filter - to the project. Downloads
-// run on the server; this component polls their progress.
+// Whole-proteome source: browse and filter one of the proteomes in the shared
+// library (added in the Library tab - one copy for everyone, nothing is
+// downloaded per user) and add chosen proteins - or everything matching the
+// filter - to the project. A protein added this way stays tied to that exact
+// proteome version, so its features are shared and its runs can say which
+// proteome they used.
 import React, { useCallback, useEffect, useState } from 'react';
 import styles from '../styles/SequencesTab.module.css';
 
 const PAGE_SIZE = 50;
-const POLL_MS = 2000;
-
-function formatBytes(bytes) {
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
 
 function ProteomeBrowser({ api, onAdd, adding, targetLabel }) {
-  const [local, setLocal] = useState({ workspace: { active: true }, local: [], downloads: [] });
-  const [finderQuery, setFinderQuery] = useState('');
-  const [reviewedOnly, setReviewedOnly] = useState(true);
-  const [found, setFound] = useState(null);
-  const [finding, setFinding] = useState(false);
+  const [library, setLibrary] = useState(null);
   const [error, setError] = useState('');
-  const [browsing, setBrowsing] = useState(null); // { upid, reviewedOnly }
+  const [browsing, setBrowsing] = useState(null); // the library proteome being browsed
   const [filter, setFilter] = useState({ q: '', minLen: '', maxLen: '' });
   const [page, setPage] = useState(1);
   const [data, setData] = useState({ total: 0, items: [] });
@@ -28,18 +20,11 @@ function ProteomeBrowser({ api, onAdd, adding, targetLabel }) {
   const [picked, setPicked] = useState(new Set());
   const [confirmingAll, setConfirmingAll] = useState(false);
 
-  const loadLocal = useCallback(() => api.get('/alphapulldown/proteomes')
-    .then(res => setLocal(res.data))
+  const loadLibrary = useCallback(() => api.get('/alphapulldown/library')
+    .then(res => setLibrary(res.data))
     .catch(err => setError(err.response?.data?.error || err.message)), [api]);
 
-  useEffect(() => { loadLocal(); }, [loadLocal]);
-
-  const downloading = local.downloads.some(d => d.state === 'downloading');
-  useEffect(() => {
-    if (!downloading) return undefined;
-    const timer = setInterval(loadLocal, POLL_MS);
-    return () => clearInterval(timer);
-  }, [downloading, loadLocal]);
+  useEffect(() => { loadLibrary(); }, [loadLibrary]);
 
   // Browse page: refetch whenever the proteome, filter or page changes.
   // The filter is applied after a short pause so typing does not fire a
@@ -48,10 +33,8 @@ function ProteomeBrowser({ api, onAdd, adding, targetLabel }) {
     if (!browsing) return undefined;
     setLoadingEntries(true);
     const timer = setTimeout(() => {
-      api.get(`/alphapulldown/proteomes/${browsing.upid}/entries`, {
-        params: {
-          reviewedOnly: browsing.reviewedOnly ? 1 : 0, q: filter.q, minLen: filter.minLen, maxLen: filter.maxLen, page, limit: PAGE_SIZE
-        }
+      api.get(`/alphapulldown/library/proteomes/${browsing.id}/entries`, {
+        params: { q: filter.q, minLen: filter.minLen, maxLen: filter.maxLen, page, limit: PAGE_SIZE }
       })
         .then(res => setData(res.data))
         .catch(err => setError(err.response?.data?.error || err.message))
@@ -60,35 +43,8 @@ function ProteomeBrowser({ api, onAdd, adding, targetLabel }) {
     return () => clearTimeout(timer);
   }, [api, browsing, filter, page]);
 
-  function find(e) {
-    e.preventDefault();
-    if (!finderQuery.trim()) return;
-    setFinding(true);
-    setError('');
-    api.get('/alphapulldown/uniprot/proteomes', { params: { q: finderQuery.trim() } })
-      .then(res => setFound(res.data.results))
-      .catch(err => setError(err.response?.data?.error || err.message))
-      .finally(() => setFinding(false));
-  }
-
-  function download(upid) {
-    setError('');
-    api.post(`/alphapulldown/proteomes/${upid}/download`, { reviewedOnly })
-      .then(loadLocal)
-      .catch(err => setError(err.response?.data?.error || err.message));
-  }
-
-  function remove(item) {
-    api.delete(`/alphapulldown/proteomes/${item.upid}`, { params: { reviewedOnly: item.reviewedOnly ? 1 : 0 } })
-      .then(() => {
-        if (browsing && browsing.upid === item.upid && browsing.reviewedOnly === item.reviewedOnly) setBrowsing(null);
-        return loadLocal();
-      })
-      .catch(err => setError(err.response?.data?.error || err.message));
-  }
-
   function browse(item) {
-    setBrowsing({ upid: item.upid, reviewedOnly: item.reviewedOnly });
+    setBrowsing(item);
     setFilter({ q: '', minLen: '', maxLen: '' });
     setPage(1);
     setPicked(new Set());
@@ -120,86 +76,42 @@ function ProteomeBrowser({ api, onAdd, adding, targetLabel }) {
   }
 
   function addPicked() {
-    onAdd({ source: 'proteome', upid: browsing.upid, reviewedOnly: browsing.reviewedOnly, accessions: [...picked] })
+    onAdd({ source: 'proteome', proteomeId: browsing.id, accessions: [...picked] })
       .then(() => setPicked(new Set()));
   }
 
   function addAllMatching() {
     setConfirmingAll(false);
-    onAdd({ source: 'proteome', upid: browsing.upid, reviewedOnly: browsing.reviewedOnly, filter });
+    onAdd({ source: 'proteome', proteomeId: browsing.id, filter });
   }
 
   const pages = Math.max(1, Math.ceil(data.total / PAGE_SIZE));
   const allOnPagePicked = data.items.length > 0 && data.items.every(i => picked.has(i.accession));
-  const activeDownloads = local.downloads.filter(d => d.state !== 'done');
 
-  if (!local.workspace.active) {
-    return <p className={styles.warningBanner}>Your workspace storage isn&apos;t available, so proteomes can&apos;t be downloaded. Contact an administrator.</p>;
+  if (!library) return <p className={styles.empty}>{error || 'Loading...'}</p>;
+  if (!library.configured) {
+    return <p className={styles.warningBanner}>The shared library has no folder yet, so there are no proteomes to browse. Ask staff to set it up in Setup.</p>;
   }
 
   return (
     <div>
-      <h4 className={styles.sectionTitle}>Find a proteome on UniProt</h4>
-      <form className={styles.controls} onSubmit={find}>
-        <input
-          className={styles.inputWide}
-          type="text"
-          placeholder="Organism name, taxon id or proteome id (UP...)"
-          value={finderQuery}
-          onChange={e => setFinderQuery(e.target.value)}
-        />
-        <label className={styles.checkboxField}>
-          <input type="checkbox" checked={reviewedOnly} onChange={e => setReviewedOnly(e.target.checked)} />
-          <span>Download reviewed (Swiss-Prot) entries only</span>
-        </label>
-        <button type="submit" className={styles.btnBlue} disabled={finding || !finderQuery.trim()}>
-          {finding ? 'Searching...' : 'Search'}
-        </button>
-      </form>
+      <h4 className={styles.sectionTitle}>Proteomes in the shared library</h4>
       {error && <p className={styles.errorText}>{error}</p>}
-      {found && found.length === 0 && <p className={styles.empty}>No proteomes found.</p>}
-      {found && found.length > 0 && (
-        <div className={styles.tableWrapper}>
-          <table className={styles.table}>
-            <thead><tr><th>Proteome</th><th>Organism</th><th>Taxon</th><th className={styles.numeric}>Proteins</th><th /></tr></thead>
-            <tbody>
-              {found.map(p => (
-                <tr key={p.upid}>
-                  <td className={styles.mono}>{p.upid}</td>
-                  <td>{p.organism}</td>
-                  <td>{p.taxId}</td>
-                  <td className={styles.numeric}>{p.proteinCount.toLocaleString()}</td>
-                  <td><button type="button" className={styles.btnGreen} onClick={() => download(p.upid)}>Download</button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      <h4 className={styles.sectionTitle}>Your downloaded proteomes</h4>
-      {activeDownloads.map(d => (
-        <p key={d.file} className={d.state === 'error' ? styles.errorText : styles.hint}>
-          {d.state === 'downloading' ? `Downloading ${d.file}... ${formatBytes(d.bytes)}` : `${d.file} failed: ${d.error}`}
-        </p>
-      ))}
-      {local.local.length === 0 ? (
-        <p className={styles.empty}>None yet - search for a proteome above and download it.</p>
+      {library.proteomes.length === 0 ? (
+        <p className={styles.empty}>The library holds no proteome yet - add one in the Library tab.</p>
       ) : (
         <div className={styles.tableWrapper}>
           <table className={styles.table}>
-            <thead><tr><th>Proteome</th><th>Content</th><th className={styles.numeric}>Size</th><th /></tr></thead>
+            <thead><tr><th>Organism</th><th>Proteome</th><th>UniProt release</th><th>Content</th><th className={styles.numeric}>Sequences</th><th /></tr></thead>
             <tbody>
-              {local.local.map(item => (
-                <tr key={item.file}>
+              {library.proteomes.map(item => (
+                <tr key={item.id}>
+                  <td>{item.organism}</td>
                   <td className={styles.mono}>{item.upid}</td>
-                  <td>{item.reviewedOnly ? 'Reviewed only' : 'All entries'}</td>
-                  <td className={styles.numeric}>{formatBytes(item.bytes)}</td>
-                  <td>
-                    <button type="button" className={styles.btnBlue} onClick={() => browse(item)}>Browse</button>
-                    {' '}
-                    <button type="button" className={styles.btnGray} onClick={() => remove(item)}>Delete</button>
-                  </td>
+                  <td>{item.release}</td>
+                  <td>{item.subset === 'reviewed' ? 'Reviewed only' : 'All entries'}</td>
+                  <td className={styles.numeric}>{item.entries.toLocaleString()}</td>
+                  <td><button type="button" className={styles.btnBlue} onClick={() => browse(item)}>Browse</button></td>
                 </tr>
               ))}
             </tbody>
@@ -209,7 +121,7 @@ function ProteomeBrowser({ api, onAdd, adding, targetLabel }) {
 
       {browsing && (
         <>
-          <h4 className={styles.sectionTitle}>{`Browsing ${browsing.upid}${browsing.reviewedOnly ? ' (reviewed only)' : ''}`}</h4>
+          <h4 className={styles.sectionTitle}>{`Browsing ${browsing.organism} (${browsing.upid}, release ${browsing.release}${browsing.subset === 'reviewed' ? ', reviewed only' : ''})`}</h4>
           <div className={styles.controls}>
             <input
               className={styles.inputWide}

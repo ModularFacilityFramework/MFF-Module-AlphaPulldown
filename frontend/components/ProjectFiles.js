@@ -51,7 +51,7 @@ function ProjectFiles({ api, project, refreshKey }) {
     <div className={styles.panel}>
       <h4 className={styles.panelTitle}>Files for AlphaPulldown</h4>
       <p className={styles.hint}>
-        FASTA files for the MSA stage and protein lists, written to your workspace. FASTA headers hold only the protein
+        FASTA files for the Features stage and protein lists, written to your workspace. FASTA headers hold only the protein
         name, because AlphaPulldown names each protein&apos;s feature file after the header. Lists have one protein per
         line; a copy number above 1 is written as <span className={styles.mono}>name:2</span>.
       </p>

@@ -1,3 +1,4 @@
+/* eslint-disable no-template-curly-in-string -- shell snippets are written as plain strings */
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
@@ -8,9 +9,9 @@ const plan = require('./msaPlan');
 
 const SETTINGS = {
   env_manager: 'micromamba',
-  env_name: 'alphapulldown',
-  data_dir: '/data/af2',
-  msa_use_mmseqs2: 0,
+  env_name: 'alphafold3_alphapulldown',
+  data_dir: '/data/db',
+  pdb_seqres_path: '/data/db/pdb_seqres/pdb_seqres.txt',
   max_template_date: '2050-01-01',
   msa_partition: 'cpu',
   msa_cpus_per_task: 8,
@@ -57,10 +58,9 @@ test('fewer proteins than slots only asks for what is needed', () => {
   assert.strictEqual(plan.msaResources(SETTINGS, 0).parallel, 1);
 });
 
-test('a run needs a database directory unless MMseqs2 is on', () => {
+test('a run needs a database directory', () => {
   assert.strictEqual(plan.msaProblems(SETTINGS).length, 0);
   assert.strictEqual(plan.msaProblems({ ...SETTINGS, data_dir: '' }).length, 1);
-  assert.strictEqual(plan.msaProblems({ ...SETTINGS, data_dir: '', msa_use_mmseqs2: 1 }).length, 0);
 });
 
 test('proteins are unique by name; a name with two sequences is a conflict', () => {
@@ -71,6 +71,23 @@ test('proteins are unique by name; a name with two sequences is a conflict', () 
   const { proteins, conflicts } = plan.uniqueProteins(rows);
   assert.deepStrictEqual(proteins.map(p => p.name), ['A', 'B']);
   assert.deepStrictEqual(conflicts, ['B']);
+});
+
+test('a protein picked from a library proteome keeps the proteome it came from', () => {
+  const rows = [
+    { name: 'A', length: 3, sequence: 'AAA', proteome_id: null },
+    { name: 'A', length: 3, sequence: 'AAA', proteome_id: 7 },
+    { name: 'B', length: 3, sequence: 'CCC', proteome_id: 8 },
+    { name: 'C', length: 3, sequence: 'GGG' }
+  ];
+  assert.deepStrictEqual(plan.uniqueProteins(rows).proteins.map(p => p.proteomeId), [7, 8, null]);
+});
+
+test('feature file names: plain and compressed AlphaFold 3 features, nothing else', () => {
+  assert.strictEqual(plan.featureNameOf('P12345_af3_input.json.xz'), 'P12345');
+  assert.strictEqual(plan.featureNameOf('P12345_af3_input.json'), 'P12345');
+  assert.strictEqual(plan.featureNameOf('P12345.pkl'), null);
+  assert.strictEqual(plan.featureNameOf('set.json'), null);
 });
 
 test('timings: bad lines are ignored, a retry keeps its last line', () => {
@@ -110,22 +127,35 @@ test('the submit script carries the resources, the activation and the xargs loop
   assert.match(script, /#SBATCH --cpus-per-task=32/);
   assert.match(script, /#SBATCH --time=1-06:00:00/);
   assert.match(script, /#SBATCH --mail-user=a@b.org/);
-  assert.match(script, /micromamba activate alphapulldown/);
+  assert.match(script, /micromamba activate alphafold3_alphapulldown/);
+  assert.match(script, /python capture_env\.py environment\.json '\/data\/db' '\/data\/db\/pdb_seqres\/pdb_seqres\.txt' \$\(cat sets\.txt\)/);
+  assert.ok(script.indexOf('capture_env.py') < script.indexOf('xargs'), 'the environment is checked before anything is searched');
   assert.match(script, /seq 1 10 \| xargs -P 4 -n 1 bash \.\/run_one\.sh/);
   assert.ok(!/set -e/.test(script));
   const bare = plan.buildSubmitScript({ slug: 's', settings: { ...SETTINGS, msa_partition: '', env_manager: 'conda' }, resources, count: 10 });
   assert.ok(!bare.includes('--partition') && !bare.includes('--mail-user'));
-  assert.match(bare, /conda activate alphapulldown/);
+  assert.match(bare, /conda activate alphafold3_alphapulldown/);
 });
 
-test('the per-protein command uses the local database or MMseqs2, never both', () => {
-  const local = plan.buildRunOneScript(SETTINGS, { featuresDir: '/ws/P1/features', redo: false });
-  assert.match(local, /--data_dir='\/data\/af2'/);
-  assert.match(local, /--skip_existing=True --use_precomputed_msas=True/);
-  assert.ok(!local.includes('use_mmseqs2'));
-  const mm = plan.buildRunOneScript({ ...SETTINGS, msa_use_mmseqs2: 1, data_dir: '' }, { featuresDir: '/ws/P1/features', redo: true });
-  assert.match(mm, /--use_mmseqs2=True/);
-  assert.ok(!mm.includes('--data_dir') && !mm.includes('skip_existing') && !mm.includes('[ -e'));
+test('the per-protein command is AlphaPulldown\'s AlphaFold 3 data pipeline against the local databases', () => {
+  const script = plan.buildRunOneScript(SETTINGS, { featuresDir: '/ws/P1/features', redo: false });
+  assert.match(script, /create_individual_features\.py --data_pipeline=alphafold3 --fasta_paths=msa_input\.fasta --output_dir="\$out" --data_dir='\/data\/db'/);
+  assert.match(script, /--compress_features=True --seq_index="\$i" --pdb_seqres_database_path='\/data\/db\/pdb_seqres\/pdb_seqres\.txt' --skip_existing=True/);
+  assert.ok(!script.includes('mmseqs'), 'the AlphaFold 3 pipeline has no MMseqs2 mode');
+  const redo = plan.buildRunOneScript({ ...SETTINGS, pdb_seqres_path: '' }, { featuresDir: '/ws/P1/features', redo: true });
+  assert.ok(!redo.includes('--skip_existing') && !redo.includes('pdb_seqres_database_path'));
+  assert.match(redo, /^redo=1$/m);
+});
+
+test('shared features are listed as targets and sets; own features are not', () => {
+  const settings = SETTINGS;
+  const files = plan.buildRunFiles({
+    slug: 'x', settings, email: '', resources: plan.msaResources(settings, 2), featuresDir: '/ws/P1/features', redo: false,
+    proteins: [{ name: 'A', length: 3, sequence: 'AAA', outDir: '/lib/features/S1' }, { name: 'B', length: 3, sequence: 'CCC' }, { name: 'C', length: 3, sequence: 'GGG', outDir: '/lib/features/S1' }]
+  });
+  assert.strictEqual(files['msa_targets.txt'], '/lib/features/S1\n/ws/P1/features\n/lib/features/S1\n');
+  assert.strictEqual(files['sets.txt'], '/lib/features/S1\n');
+  assert.match(files['capture_env.py'], /fcntl\.flock/);
 });
 
 test('both scripts are valid bash', () => {
@@ -141,7 +171,7 @@ test('both scripts are valid bash', () => {
 });
 
 // Runs the generated scripts for real, with a stand-in for AlphaPulldown on
-// PATH: it "searches" for a moment, writes <name>.pkl, fails for one protein
+// PATH: it "searches" for a moment, writes <name>_af3_input.json.xz, fails for one protein
 // and is killed (137) for another.
 test('run_one.sh and the xargs loop: timings, skip, failure and parallelism', { skip: process.platform === 'win32' }, () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'msa-plan-'));
@@ -159,12 +189,12 @@ test('run_one.sh and the xargs loop: timings, skip, failure and parallelism', { 
       'sleep 1',
       'if [ "$name" = BAD ]; then echo boom >&2; exit 1; fi',
       'if [ "$name" = KILLED ]; then exit 137; fi',
-      'touch "$out/$name.pkl"',
+      'touch "$out/${name}_af3_input.json.xz"',
       ''
     ].join('\n'), { mode: 0o755 });
 
     const proteins = ['AAA', 'BAD', 'CCC', 'KILLED', 'DDD', 'EEE'].map(name => ({ name, length: name === 'BAD' ? 50 : 100, sequence: 'M'.repeat(10) }));
-    fs.writeFileSync(path.join(features, 'CCC.pkl'), '');
+    fs.writeFileSync(path.join(features, 'CCC_af3_input.json.xz'), '');
     const settings = { ...SETTINGS, msa_array_throttle: 3 };
     const resources = plan.msaResources(settings, proteins.length);
     const files = plan.buildRunFiles({ slug: 'x', settings, email: '', resources, proteins, featuresDir: features, redo: false });
@@ -183,12 +213,74 @@ test('run_one.sh and the xargs loop: timings, skip, failure and parallelism', { 
     assert.strictEqual(timings[3].exit, 137);
     assert.ok(timings[0].seconds >= 1 && timings[0].seconds <= 3);
     assert.strictEqual(timings[2].seconds, 0);
-    assert.ok(fs.existsSync(path.join(features, 'AAA.pkl')) && fs.existsSync(path.join(features, 'EEE.pkl')));
+    assert.ok(fs.existsSync(path.join(features, 'AAA_af3_input.json.xz')) && fs.existsSync(path.join(features, 'EEE_af3_input.json.xz')));
     assert.ok(!fs.existsSync(path.join(run, 'args.3.txt')), 'the skipped protein must not be searched');
     assert.match(fs.readFileSync(path.join(run, 'logs', '2.log'), 'utf8'), /boom/);
-    assert.match(fs.readFileSync(path.join(run, 'args.1.txt'), 'utf8'), /--seq_index=1 .*--data_dir=\/data\/af2/);
+    assert.match(fs.readFileSync(path.join(run, 'args.1.txt'), 'utf8'), /--data_dir=\/data\/db .*--seq_index=1/);
     assert.ok(seconds < 4.5, `five 1-second searches, three at a time, took ${seconds}s`);
     assert.ok(!fs.readFileSync(path.join(run, 'timings.tsv'), 'utf8').includes('AAA'), 'timings must hold no names');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The shared-library path: one protein is built into the shared folder and
+// linked, one is already there and only linked, one is the user's own. A
+// second run must not compute anything again, and "search again" must leave
+// the shared file alone.
+test('library proteins are built once into the shared folder and linked into the project', { skip: process.platform === 'win32' }, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'msa-lib-'));
+  try {
+    const bin = path.join(dir, 'bin');
+    const shared = path.join(dir, 'lib', 'features', 'S1');
+    const features = path.join(dir, 'ws', 'features');
+    const run = path.join(dir, 'run');
+    [bin, shared, run].forEach(d => fs.mkdirSync(d, { recursive: true }));
+    fs.writeFileSync(path.join(bin, 'create_individual_features.py'), [
+      '#!/bin/bash',
+      // eslint-disable-next-line no-template-curly-in-string
+      'for a in "$@"; do case "$a" in --seq_index=*) i="${a#--seq_index=}";; --output_dir=*) out="${a#--output_dir=}";; esac; done',
+      'name=$(sed -n -e "$i p" msa_names.txt)',
+      'echo "$name" >> "$CALLS"',
+      'echo features > "$out/${name}_af3_input.json.xz"',
+      ''
+    ].join('\n'), { mode: 0o755 });
+    fs.writeFileSync(path.join(shared, 'LIB2_af3_input.json.xz'), 'already there');
+
+    const proteins = [
+      { name: 'LIB1', length: 10, sequence: 'M'.repeat(10), outDir: shared },
+      { name: 'LIB2', length: 10, sequence: 'M'.repeat(10), outDir: shared },
+      { name: 'OWN', length: 10, sequence: 'M'.repeat(10) }
+    ];
+    const resources = plan.msaResources(SETTINGS, 3);
+    const execute = redo => {
+      const files = plan.buildRunFiles({ slug: 'x', settings: SETTINGS, email: '', resources, proteins, featuresDir: features, redo });
+      Object.entries(files).forEach(([name, content]) => fs.writeFileSync(path.join(run, name), content));
+      fs.rmSync(path.join(run, 'timings.tsv'), { force: true });
+      fs.mkdirSync(path.join(run, 'logs'), { recursive: true });
+      const loop = files['submit.sh'].split('\n').filter(l => l.startsWith('seq ')).join('\n');
+      return spawnSync('bash', ['-c', loop], { cwd: run, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, CALLS: path.join(dir, 'calls.txt') } });
+    };
+    const calls = () => (fs.existsSync(path.join(dir, 'calls.txt')) ? fs.readFileSync(path.join(dir, 'calls.txt'), 'utf8').split('\n').filter(Boolean).sort() : []);
+
+    assert.strictEqual(execute(false).status, 0);
+    assert.deepStrictEqual(calls(), ['LIB1', 'OWN'], 'the protein already in the library is not searched');
+    assert.ok(fs.existsSync(path.join(shared, 'LIB1_af3_input.json.xz')));
+    ['LIB1', 'LIB2'].forEach(name => {
+      const link = path.join(features, `${name}_af3_input.json.xz`);
+      assert.ok(fs.lstatSync(link).isSymbolicLink(), `${name} is linked, not copied`);
+      assert.strictEqual(fs.readlinkSync(link), path.join(shared, `${name}_af3_input.json.xz`));
+    });
+    assert.ok(!fs.lstatSync(path.join(features, 'OWN_af3_input.json.xz')).isSymbolicLink(), 'own features stay in the project');
+    assert.ok(fs.existsSync(path.join(shared, '.locks', 'LIB1.lock')));
+
+    fs.rmSync(path.join(dir, 'calls.txt'));
+    assert.strictEqual(execute(false).status, 0);
+    assert.deepStrictEqual(calls(), [], 'a second run computes nothing');
+
+    assert.strictEqual(execute(true).status, 0);
+    assert.deepStrictEqual(calls(), ['OWN'], 'search again redoes the own protein and never a shared one');
+    assert.strictEqual(fs.readFileSync(path.join(shared, 'LIB2_af3_input.json.xz'), 'utf8'), 'already there');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

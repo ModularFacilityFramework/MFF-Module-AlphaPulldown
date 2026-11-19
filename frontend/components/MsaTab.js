@@ -1,10 +1,12 @@
-// MSA (CPU) tab: shows what a run of AlphaPulldown's feature search would be
+// Features (CPU) tab: shows what a run of AlphaPulldown's feature search would be
 // for the selected project (how many proteins, what it asks Slurm for),
 // starts it, and follows each run - progress, failed proteins, logs. All of
 // it goes through this module's own /alphapulldown routes; the backend talks
 // to the Slurm module. Only ever touches core through the coreApi prop.
 import React, { useCallback, useEffect, useState } from 'react';
 import LogViewer from './LogViewer';
+import MethodsPanel from './MethodsPanel';
+import ProvenanceView from './ProvenanceView';
 import { formatDuration } from './formatDuration';
 import { errorText, badgeClass as badgeClassFor, formatWhen } from './runUi';
 import styles from '../styles/MsaTab.module.css';
@@ -53,6 +55,14 @@ function PlanPanel({ plan, redo, onRedo, onStart, starting }) {
           )}
         </>
       )}
+      {plan.library && plan.library.proteins > 0 && (
+        <p className={styles.hint}>
+          {`${plan.library.proteins.toLocaleString()} protein${plan.library.proteins === 1 ? '' : 's'} come from library proteomes: their features are built once into the shared library (${plan.library.proteomes.map(p => `${p.organism}, UniProt ${p.release}`).join('; ')}) and linked here, so nobody searches the same protein twice.`}
+        </p>
+      )}
+      {plan.library && plan.library.ownProteins > 0 && plan.library.proteins > 0 && (
+        <p className={styles.hint}>{`${plan.library.ownProteins.toLocaleString()} are your own sequences, searched into the project's folder.`}</p>
+      )}
       {plan.activeRun && <p className={styles.warning}>A run for this project is still going (run {plan.activeRun.id}).</p>}
       {plan.toDo === 0 && plan.proteins > 0 && plan.problems.length === 0 && (
         <p className={styles.hint}>Every protein already has its features - the next tab can start.</p>
@@ -60,7 +70,7 @@ function PlanPanel({ plan, redo, onRedo, onStart, starting }) {
       <div className={styles.controls}>
         <label className={styles.checkboxField}>
           <input type="checkbox" checked={redo} onChange={e => onRedo(e.target.checked)} />
-          <span>Search again, even for proteins that already have features</span>
+          <span>Search again, even for your own proteins that already have features (shared library features are never rebuilt)</span>
         </label>
         <button type="button" className={styles.btnGreen} onClick={onStart} disabled={blocked || starting}>
           {starting ? 'Submitting...' : 'Run'}
@@ -141,6 +151,7 @@ function RunDetail({ api, projectId, run }) {
   return (
     <div className={styles.detail}>
       {error && <p className={styles.errorText}>{error}</p>}
+      <ProvenanceView record={detail ? detail.provenance : run.provenance} />
       {failed.length > 0 && (
         <>
           <h4 className={styles.panelTitle}>Proteins that failed</h4>
@@ -255,6 +266,7 @@ function MsaTab({ coreApi, project, onChanged }) {
           {openId === run.id && <RunDetail api={api} projectId={projectId} run={run} />}
         </div>
       ))}
+      <MethodsPanel api={api} projectId={projectId} refreshKey={(runs || []).map(r => `${r.id}${r.state}`).join(',')} />
     </div>
   );
 }

@@ -1,5 +1,5 @@
-// The Sequences tab's backend: UniProt search, proteome download and
-// browsing, adding/removing a project's proteins, and writing the FASTA and
+// The Sequences tab's backend: UniProt search, browsing the shared library's
+// proteomes, adding/removing a project's proteins, and writing the FASTA and
 // protein-list files AlphaPulldown reads. Every project query is scoped to
 // req.user.id. Everything this module needs from core comes through coreApi
 // (see docs/MFF-Core_module-core-api.md).
@@ -11,7 +11,8 @@ const { projectDir } = require('../services/projectPaths');
 const { findProject } = require('../services/projectAccess');
 const fasta = require('../services/fastaTools');
 const uniprot = require('../services/uniprotClient');
-const proteomeStore = require('../services/proteomeStore');
+const libraryStore = require('../services/libraryStore');
+const library = require('../services/libraryService');
 const { filterEntries, summarize } = require('../services/proteomeIndex');
 
 const MAX_SEQUENCES_PER_PROJECT = 25000;
@@ -136,49 +137,33 @@ module.exports = function buildRouter(coreApi) {
     res.json({ results: await fromUniprot(() => uniprot.searchProteomes({ query: q })) });
   }));
 
-  // ---- Proteomes kept in the user's workspace ---------------------------
+  // ---- Proteomes of the shared library ----------------------------------
 
-  router.get('/proteomes', auth, plain('Failed to list proteomes', async (req, res) => {
-    const workspace = await coreApi.getUserWorkspacePath(req.user);
-    res.json({
-      workspace: { active: workspace.active, reason: workspace.reason },
-      local: workspace.active ? await proteomeStore.listLocal(workspace.path) : [],
-      downloads: proteomeStore.downloadsFor(req.user.id)
-    });
-  }));
+  // Browsing reads the library's one copy; nothing is downloaded or kept per user.
+  async function requireProteome(conn, id) {
+    const config = await library.loadConfig(conn);
+    if (!config.configured) throw httpError(503, 'The shared library has no folder yet. Ask staff to set it in Setup.');
+    const row = await library.findProteome(conn, id);
+    if (!row) throw httpError(404, 'This proteome is not in the library');
+    return { config, row };
+  }
 
-  router.post('/proteomes/:upid/download', auth, plain('Failed to start download', async (req, res) => {
-    if (!uniprot.UPID.test(req.params.upid)) throw httpError(400, 'Not a proteome id (expected UP followed by 9 digits)');
-    const workspace = await requireWorkspace(req);
-    res.status(202).json(proteomeStore.startDownload({
-      userId: req.user.id,
-      workspacePath: workspace.path,
-      upid: req.params.upid,
-      reviewedOnly: !!(req.body && req.body.reviewedOnly)
-    }));
-  }));
-
-  router.get('/proteomes/:upid/entries', auth, plain('Failed to read proteome', async (req, res) => {
-    if (!uniprot.UPID.test(req.params.upid)) throw httpError(400, 'Not a proteome id');
-    const workspace = await requireWorkspace(req);
-    let index;
+  async function loadProteomeIndex(config, row) {
     try {
-      index = await proteomeStore.loadIndex(workspace.path, req.params.upid, req.query.reviewedOnly === '1');
+      return await libraryStore.loadIndex(config.libraryDir, library.versionOf(row));
     } catch (err) {
-      if (err.code === 'ENOENT') throw httpError(404, 'This proteome has not been downloaded');
+      if (err.code === 'ENOENT') throw httpError(404, 'The library has no file for this proteome');
       throw err;
     }
+  }
+
+  router.get('/library/proteomes/:id/entries', auth, withConn('Failed to read proteome', async (req, res, conn) => {
+    const { config, row } = await requireProteome(conn, req.params.id);
+    const index = await loadProteomeIndex(config, row);
     const filtered = filterEntries(index, normalizeFilter({ q: req.query.q, minLen: req.query.minLen, maxLen: req.query.maxLen }));
     const page = intParam(req.query.page, 1, 1, 1000000);
     const limit = intParam(req.query.limit, 50, 1, 200);
     res.json({ total: filtered.length, page, limit, items: filtered.slice((page - 1) * limit, page * limit).map(summarize) });
-  }));
-
-  router.delete('/proteomes/:upid', auth, plain('Failed to delete proteome', async (req, res) => {
-    if (!uniprot.UPID.test(req.params.upid)) throw httpError(400, 'Not a proteome id');
-    const workspace = await requireWorkspace(req);
-    await proteomeStore.remove(workspace.path, req.params.upid, req.query.reviewedOnly === '1');
-    res.json({ success: true });
   }));
 
   // ---- A project's sequences --------------------------------------------
@@ -211,7 +196,7 @@ module.exports = function buildRouter(coreApi) {
 
   // Turns a request body into candidate entries ({ name, description,
   // sequence, length, errors[] }) plus problems found on the way.
-  async function collectEntries(req, body, problems) {
+  async function collectEntries(conn, req, body, problems) {
     if (body.source === 'paste') {
       if (typeof body.text !== 'string' || !body.text.trim()) throw httpError(400, 'text is required');
       if (body.text.length > MAX_PASTE_CHARS) throw httpError(400, 'Too much text in one request');
@@ -235,15 +220,9 @@ module.exports = function buildRouter(coreApi) {
     }
 
     if (body.source === 'proteome') {
-      if (!uniprot.UPID.test(body.upid || '')) throw httpError(400, 'upid is required');
-      const workspace = await requireWorkspace(req);
-      let index;
-      try {
-        index = await proteomeStore.loadIndex(workspace.path, body.upid, !!body.reviewedOnly);
-      } catch (err) {
-        if (err.code === 'ENOENT') throw httpError(404, 'This proteome has not been downloaded');
-        throw err;
-      }
+      if (!Number.isInteger(Number(body.proteomeId)) || Number(body.proteomeId) < 1) throw httpError(400, 'proteomeId is required');
+      const { config, row } = await requireProteome(conn, body.proteomeId);
+      const index = await loadProteomeIndex(config, row);
       let selected;
       if (Array.isArray(body.accessions)) {
         if (body.accessions.length > MAX_PROTEOME_ACCESSIONS) throw httpError(400, `Select at most ${MAX_PROTEOME_ACCESSIONS} proteins by hand; use a filter for more`);
@@ -259,6 +238,8 @@ module.exports = function buildRouter(coreApi) {
         description: e.description.slice(0, 500),
         sequence: e.sequence,
         length: e.length,
+        proteomeId: Number(row.id),
+        accession: e.accession,
         errors: fasta.validateSequence(e.sequence)
       }));
     }
@@ -280,7 +261,7 @@ module.exports = function buildRouter(coreApi) {
     }
 
     const problems = [];
-    const entries = await collectEntries(req, body, problems);
+    const entries = await collectEntries(conn, req, body, problems);
 
     const valid = [];
     entries.forEach(entry => {
@@ -308,9 +289,9 @@ module.exports = function buildRouter(coreApi) {
         for (let i = 0; i < fresh.length; i += INSERT_BATCH) {
           const batch = fresh.slice(i, i + INSERT_BATCH);
           await conn.query(
-            `INSERT INTO alphapulldown_project_sequences (project_id, role, name, source, description, length, sequence)
-             VALUES ${batch.map(() => '(?, ?, ?, ?, ?, ?, ?)').join(', ')}`,
-            batch.flatMap(e => [project.id, body.role, e.name, body.source, e.description || null, e.length, e.sequence])
+            `INSERT INTO alphapulldown_project_sequences (project_id, role, name, source, description, length, sequence, proteome_id, accession)
+             VALUES ${batch.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ')}`,
+            batch.flatMap(e => [project.id, body.role, e.name, body.source, e.description || null, e.length, e.sequence, e.proteomeId || null, e.accession || null])
           );
         }
         await conn.query('UPDATE alphapulldown_projects SET updated_at = CURRENT_TIMESTAMP WHERE id = ?', [project.id]);

@@ -18,6 +18,11 @@ const { recordSamples } = require('../services/speedRecorder');
 const slurm = require('../services/slurmClient');
 const { httpError, makeHelpers } = require('../services/routeHelpers');
 const plan = require('../services/msaPlan');
+const library = require('../services/libraryService');
+const libraryPaths = require('../services/libraryPaths');
+const { namesWithFeatures } = require('../services/featureFiles');
+const provenance = require('../services/provenance');
+const manifest = require('../../module.manifest.json');
 
 const FEATURES_DIRNAME = 'features';
 const MAX_LISTED_RUNS = 50;
@@ -36,17 +41,6 @@ async function readTextIfExists(file) {
     return await fs.readFile(file, 'utf8');
   } catch (err) {
     if (err.code === 'ENOENT') return '';
-    throw err;
-  }
-}
-
-// Names that already have a features file (<name>.pkl or <name>.pkl.xz).
-async function namesWithFeatures(dir) {
-  try {
-    const entries = await fs.readdir(dir);
-    return new Set(entries.map(e => e.replace(/\.pkl(\.xz)?$/, '')).filter((n, i) => n !== entries[i]));
-  } catch (err) {
-    if (err.code === 'ENOENT') return new Set();
     throw err;
   }
 }
@@ -75,11 +69,14 @@ module.exports = function buildRouter(coreApi) {
 
   // Everything a run depends on, or the reasons it cannot start. Used by the
   // preview and, unchanged, by the start route so they can never disagree.
+  // Nothing is created here: the feature set of a library proteome is only a
+  // planned name and folder until the run really starts.
   async function evaluate(req, conn, project, { redo }) {
     const settings = await loadSettings(conn, req.user.id);
     const workspace = await coreApi.getUserWorkspacePath(req.user);
+    const config = await library.loadConfig(conn);
     const rows = await conn.query(
-      'SELECT name, length, sequence FROM alphapulldown_project_sequences WHERE project_id = ? ORDER BY id',
+      'SELECT name, length, sequence, proteome_id FROM alphapulldown_project_sequences WHERE project_id = ? ORDER BY id',
       [project.id]
     );
     const { proteins, conflicts } = plan.uniqueProteins(rows);
@@ -91,17 +88,52 @@ module.exports = function buildRouter(coreApi) {
       problems.push(`These names carry two different sequences (for example as bait and as candidate); rename one: ${conflicts.slice(0, 10).join(', ')}${conflicts.length > 10 ? ', ...' : ''}`);
     }
 
+    // Proteins from a library proteome are built into that proteome version's
+    // feature set, once for everybody.
+    const groups = [];
+    const wanted = [...new Set(proteins.map(p => p.proteomeId).filter(Boolean))];
+    if (wanted.length > 0 && !config.configured) {
+      problems.push('Some proteins come from a library proteome, but the shared library has no folder yet. Ask staff to set it in Setup.');
+    } else if (wanted.length > 0) {
+      const found = await conn.query(`SELECT * FROM alphapulldown_library_proteomes WHERE id IN (${wanted.map(() => '?').join(', ')})`, wanted);
+      for (const id of wanted) {
+        const proteome = found.find(r => Number(r.id) === id);
+        if (!proteome) {
+          problems.push('A proteome that some proteins came from is no longer in the library. Remove those proteins and add them again.');
+          continue;
+        }
+        const key = libraryPaths.featureSetKey({
+          ...library.versionOf(proteome),
+          tag: config.featureSetTag,
+          format: libraryPaths.FEATURE_FORMAT,
+          maxTemplateDate: settings.max_template_date,
+          dataDir: settings.data_dir
+        });
+        const dir = libraryPaths.featureSetDir(config.libraryDir, key);
+        const members = proteins.filter(p => p.proteomeId === id);
+        members.forEach(p => { p.outDir = dir; });
+        groups.push({
+          proteome,
+          set: { id: null, set_key: key, tag: config.featureSetTag, format: libraryPaths.FEATURE_FORMAT, max_template_date: settings.max_template_date },
+          dir,
+          count: members.length
+        });
+      }
+    }
+
     let done = 0;
     let featuresDir = null;
     if (workspace.active) {
       featuresDir = path.join(projectDir(workspace.path, project.project_number), FEATURES_DIRNAME);
-      if (!redo) {
-        const existing = await namesWithFeatures(featuresDir);
-        done = proteins.filter(p => existing.has(p.name)).length;
-      }
+      const own = await namesWithFeatures(featuresDir);
+      const shared = new Map();
+      for (const group of groups) shared.set(group.dir, await namesWithFeatures(group.dir));
+      // A shared feature is never rebuilt, so "search again" only concerns the user's own proteins.
+      done = proteins.filter(p => (p.outDir ? shared.get(p.outDir).has(p.name) : !redo && own.has(p.name))).length;
     }
     const toDo = proteins.length - done;
-    return { settings, workspace, proteins, problems, done, toDo, featuresDir, redo };
+    const localProteins = proteins.filter(p => !p.outDir).length;
+    return { settings, workspace, config, proteins, groups, localProteins, problems, done, toDo, featuresDir, redo };
   }
 
   function buildFiles(info, email, slug) {
@@ -137,6 +169,15 @@ module.exports = function buildRouter(coreApi) {
       toDo: info.toDo,
       redo: info.redo,
       method: msaProfile(info.settings).method,
+      library: {
+        configured: info.config.configured,
+        proteins: info.proteins.length - info.localProteins,
+        ownProteins: info.localProteins,
+        proteomes: info.groups.map(g => ({
+          upid: g.proteome.upid, organism: g.proteome.organism, release: g.proteome.release_name, subset: g.proteome.subset,
+          proteins: g.count, featureSet: g.set.set_key
+        }))
+      },
       resources: {
         parallel: resources.parallel,
         rounds: resources.rounds,
@@ -172,7 +213,23 @@ module.exports = function buildRouter(coreApi) {
     const dir = runPath(info.workspace, project, run);
 
     try {
-      const files = buildFiles(info, email, `ap-msa-P${project.project_number}`);
+      // The shared feature sets this run builds into: row and folder now.
+      for (const group of info.groups) {
+        const made = await library.ensureSet(conn, info.config, group.proteome, info.settings, req.user.id);
+        group.set = made.row;
+        group.dir = made.dir;
+      }
+      const record = provenance.featureRunRecord({
+        module: { id: manifest.id, version: manifest.version },
+        settings: info.settings,
+        redo,
+        groups: info.groups,
+        localProteins: info.localProteins,
+        total: info.proteins.length,
+        createdAt: new Date().toISOString()
+      });
+      const files = { ...buildFiles(info, email, `ap-msa-P${project.project_number}`), 'provenance.json': `${JSON.stringify(record, null, 2)}\n` };
+      await conn.query('UPDATE alphapulldown_msa_runs SET provenance_json = ? WHERE id = ?', [JSON.stringify(record), runId]);
       await fs.mkdir(path.join(dir, 'logs'), { recursive: true });
       await fs.mkdir(info.featuresDir, { recursive: true });
       for (const [name, content] of Object.entries(files)) {
@@ -231,6 +288,41 @@ module.exports = function buildRouter(coreApi) {
     }
   }
 
+  // Once the job has ended, adds what it observed about itself (software and
+  // database versions, environment.json) to the run's provenance - planned
+  // facts stay as they were. Done once; a run that never wrote the file keeps
+  // its planned record only.
+  async function attachEnvironment(conn, run, dir) {
+    if (!plan.isTerminalState(run.state) || !run.provenance_json) return run;
+    let record;
+    try {
+      record = JSON.parse(run.provenance_json);
+    } catch (err) {
+      return run;
+    }
+    if (record.environment) return run;
+    let environment;
+    try {
+      environment = JSON.parse(await readTextIfExists(path.join(dir, 'environment.json')) || 'null');
+    } catch (err) {
+      environment = null;
+    }
+    if (!environment) return run;
+    const merged = provenance.withEnvironment(record, environment);
+    const text = JSON.stringify(merged);
+    await conn.query('UPDATE alphapulldown_msa_runs SET provenance_json = ? WHERE id = ?', [text, run.id]);
+    await fs.writeFile(path.join(dir, 'provenance.json'), `${JSON.stringify(merged, null, 2)}\n`).catch(() => {});
+    return { ...run, provenance_json: text };
+  }
+
+  function parseProvenance(run) {
+    try {
+      return run.provenance_json ? JSON.parse(run.provenance_json) : null;
+    } catch (err) {
+      return null;
+    }
+  }
+
   function describeRun(run, timings, statusError) {
     return {
       id: Number(run.id),
@@ -245,6 +337,7 @@ module.exports = function buildRouter(coreApi) {
       startedAt: run.started_at,
       endedAt: run.ended_at,
       progress: plan.progressOf(timings),
+      provenance: parseProvenance(run),
       active: !plan.isTerminalState(run.state),
       statusError: statusError || null
     };
@@ -261,11 +354,14 @@ module.exports = function buildRouter(coreApi) {
     const runs = [];
     let ingestedNow = 0;
     for (const row of rows) {
-      const { run, statusError } = await refreshRun(conn, req, row);
+      const refreshed = await refreshRun(conn, req, row);
+      const { statusError } = refreshed;
+      let run = refreshed.run;
       let timings = [];
       if (workspace.active && run.run_dir) {
         const dir = runPath(workspace, project, run);
         ingestedNow += await ingestIfDone(conn, run, dir);
+        run = await attachEnvironment(conn, run, dir);
         timings = plan.parseTimings(await readTextIfExists(path.join(dir, 'timings.tsv')));
       }
       runs.push(describeRun(run, timings, statusError));
@@ -277,9 +373,11 @@ module.exports = function buildRouter(coreApi) {
   router.get('/projects/:id/msa/runs/:runId', auth, withConn('Failed to read the MSA run', async (req, res, conn) => {
     const project = await requireProject(conn, req);
     const workspace = await requireWorkspace(req);
-    const { run, statusError } = await refreshRun(conn, req, await requireRun(conn, req, project));
-    const dir = runPath(workspace, project, run);
-    await ingestIfDone(conn, run, dir);
+    const refreshed = await refreshRun(conn, req, await requireRun(conn, req, project));
+    const { statusError } = refreshed;
+    const dir = runPath(workspace, project, refreshed.run);
+    await ingestIfDone(conn, refreshed.run, dir);
+    const run = await attachEnvironment(conn, refreshed.run, dir);
     const timings = plan.parseTimings(await readTextIfExists(path.join(dir, 'timings.tsv')));
     const names = (await readTextIfExists(path.join(dir, 'msa_names.txt'))).split('\n');
     const failed = timings

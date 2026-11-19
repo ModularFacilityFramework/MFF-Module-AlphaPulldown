@@ -5,6 +5,8 @@
 // ever touches core through the coreApi prop; all calls go to this module's
 // own /alphapulldown routes.
 import React, { useCallback, useEffect, useState } from 'react';
+import MethodsPanel from './MethodsPanel';
+import ProvenanceView from './ProvenanceView';
 import { formatDuration } from './formatDuration';
 import { errorText, badgeClass as badgeClassFor, formatWhen } from './runUi';
 import styles from '../styles/MsaTab.module.css';
@@ -137,7 +139,7 @@ function PlanPanel({ plan, options, onOptions, onStart, starting }) {
         <label className={styles.checkboxField}>
           <input type="checkbox" checked={options.reuseMsa} onChange={e => set({ reuseMsa: e.target.checked })} />
           <span>
-            {`Hand over the MSAs from the MSA tab (${plan.msa.reusable.toLocaleString()} of ${plan.msa.proteins.toLocaleString()} proteins have one)`}
+            {`Hand over the MSAs from the Features tab (${plan.msa.reusable.toLocaleString()} of ${plan.msa.proteins.toLocaleString()} proteins have one)`}
           </span>
         </label>
         {options.reuseMsa && (
@@ -394,9 +396,15 @@ function CofoldTab({ coreApi, project, onChanged }) {
             onRetry={() => act(run, () => api.post(`${base}/runs/${run.id}/retry`))}
             onDelete={() => act(run, () => api.delete(`${base}/runs/${run.id}`))}
           />
-          {openId === run.id && <RunDetail api={api} projectId={projectId} run={run} />}
+          {openId === run.id && (
+            <>
+              <ProvenanceView record={run.provenance} />
+              <RunDetail api={api} projectId={projectId} run={run} />
+            </>
+          )}
         </div>
       ))}
+      <MethodsPanel api={api} projectId={projectId} refreshKey={(runs || []).map(r => `${r.id}`).join(',')} />
     </div>
   );
 }

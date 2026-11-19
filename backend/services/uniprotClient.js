@@ -10,6 +10,7 @@ const fsp = require('fs').promises;
 const fs = require('fs');
 const { Readable, Transform } = require('stream');
 const { pipeline } = require('stream/promises');
+const crypto = require('crypto');
 
 const BASE = 'https://rest.uniprot.org';
 const USER_AGENT = 'MFF-Module-AlphaPulldown';
@@ -97,18 +98,67 @@ async function fetchFasta(accessions) {
   return text;
 }
 
+function proteomeQuery(upid, reviewedOnly) {
+  return `(proteome:${upid})${reviewedOnly ? ' AND (reviewed:true)' : ''}`;
+}
+
+// Which UniProt release is live and how many entries the proteome has in it,
+// without downloading it: the headers of a one-entry search say so. Lets the
+// library skip a download it already holds.
+async function peekRelease({ upid, reviewedOnly }) {
+  const params = new URLSearchParams({ query: proteomeQuery(upid, reviewedOnly), format: 'fasta', size: '1' });
+  const res = await request(`${BASE}/uniprotkb/search?${params}`);
+  await res.arrayBuffer();
+  return {
+    release: res.headers.get('x-uniprot-release') || '',
+    releaseDate: res.headers.get('x-uniprot-release-date') || '',
+    total: Number(res.headers.get('x-total-results')) || 0
+  };
+}
+
+// The proteome record itself: organism, taxon, type (reference or not),
+// genome assembly, BUSCO completeness - the labels the library keeps.
+async function proteomeInfo(upid) {
+  const res = await request(`${BASE}/proteomes/${upid}?format=json`);
+  const p = await res.json();
+  const busco = p.proteomeCompletenessReport && p.proteomeCompletenessReport.buscoReport;
+  return {
+    upid: p.id,
+    organism: (p.taxonomy && p.taxonomy.scientificName) || '',
+    taxId: (p.taxonomy && p.taxonomy.taxonId) || null,
+    mnemonic: (p.taxonomy && p.taxonomy.mnemonic) || '',
+    proteomeType: p.proteomeType || '',
+    strain: p.strain || '',
+    modified: p.modified || '',
+    proteinCount: p.proteinCount || 0,
+    genomeAssembly: p.genomeAssembly ? { id: p.genomeAssembly.assemblyId || '', level: p.genomeAssembly.level || '', source: p.genomeAssembly.source || '' } : null,
+    busco: busco ? { complete: busco.complete, total: busco.total, score: busco.score, lineage: busco.lineageDb || '' } : null,
+    lineage: Array.isArray(p.taxonLineage) ? p.taxonLineage.map(t => t.scientificName).filter(Boolean) : []
+  };
+}
+
 // Streams a whole proteome's FASTA to destPath (via destPath.part, renamed
-// on success). onBytes(n) reports progress. Refuses downloads over
-// MAX_DOWNLOAD_BYTES and empty results.
+// on success) and returns what the library records about the download: the
+// UniProt release the server answered with, the SHA-256 of the bytes, the
+// number of entries and the size. onBytes(n) reports progress. Refuses
+// downloads over MAX_DOWNLOAD_BYTES and empty results.
 async function downloadProteome({ upid, reviewedOnly, destPath, onBytes }) {
-  const query = `(proteome:${upid})${reviewedOnly ? ' AND (reviewed:true)' : ''}`;
+  const query = proteomeQuery(upid, reviewedOnly);
   const res = await request(`${BASE}/uniprotkb/stream?query=${encodeURIComponent(query)}&format=fasta`, { timeoutMs: 15 * 60 * 1000 });
   const tmp = `${destPath}.part`;
+  const hash = crypto.createHash('sha256');
   let bytes = 0;
+  let entries = 0;
+  let lineStart = true;
   const counter = new Transform({
     transform(chunk, encoding, callback) {
       bytes += chunk.length;
       if (bytes > MAX_DOWNLOAD_BYTES) return callback(new Error('Download is larger than the 300 MB limit'));
+      hash.update(chunk);
+      for (let i = 0; i < chunk.length; i += 1) {
+        if (lineStart && chunk[i] === 62) entries += 1;
+        lineStart = chunk[i] === 10;
+      }
       onBytes(bytes);
       return callback(null, chunk);
     }
@@ -121,6 +171,13 @@ async function downloadProteome({ upid, reviewedOnly, destPath, onBytes }) {
     await fsp.rm(tmp, { force: true });
     throw err;
   }
+  return {
+    release: res.headers.get('x-uniprot-release') || '',
+    releaseDate: res.headers.get('x-uniprot-release-date') || '',
+    sha256: hash.digest('hex'),
+    entries,
+    bytes
+  };
 }
 
 module.exports = {
@@ -129,5 +186,7 @@ module.exports = {
   searchProteins,
   searchProteomes,
   fetchFasta,
+  peekRelease,
+  proteomeInfo,
   downloadProteome
 };

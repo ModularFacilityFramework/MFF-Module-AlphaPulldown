@@ -215,3 +215,12 @@
 .mono {
   font-family: monospace;
 }
+
+.provenance {
+  margin: 8px 0 12px;
+  padding: 10px 15px;
+  background-color: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  font-size: 13px;
+}

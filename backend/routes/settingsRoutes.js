@@ -7,14 +7,15 @@ const { getRequestContext } = require('../services/requestContext');
 // Used whenever a user has no alphapulldown_settings row yet, so GET always
 // returns something PUT can upsert without the frontend special-casing "no
 // settings saved yet" vs "existing settings". Mirrors the column DEFAULTs in
-// backend/db/schema.sql. data_dir and msa_partition are empty on purpose:
-// they are facts about the user's cluster that this module cannot know.
+// backend/db/schema.sql. The paths are this cluster's installed AlphaPulldown
+// and genetic databases; msa_partition is empty on purpose (the cluster's
+// default partition is used).
 const DEFAULT_SETTINGS = {
   slurm_mail_type: 'BEGIN,END,FAIL',
   env_manager: 'micromamba',
-  env_name: 'alphapulldown',
-  data_dir: '',
-  msa_use_mmseqs2: 0,
+  env_name: 'alphafold3_alphapulldown',
+  data_dir: '/home/linuxhomes/software/genetic_db',
+  pdb_seqres_path: '/home/linuxhomes/software/genetic_db/pdb_seqres/pdb_seqres.txt',
   max_template_date: '2050-01-01',
   msa_partition: '',
   msa_cpus_per_task: 8,
@@ -34,6 +35,7 @@ const PATTERNS = {
   slurm_mail_type: /^[A-Z_,]{0,50}$/,
   env_name: /^[\w.-]{1,255}$/,
   data_dir: /^(\/[\w./-]{0,499})?$/,
+  pdb_seqres_path: /^(\/[\w./-]{0,499})?$/,
   max_template_date: /^\d{4}-\d{2}-\d{2}$/,
   msa_partition: /^[\w.,-]{0,100}$/,
   msa_mem: /^\d{1,6}[KMGT]?$/i,
@@ -56,7 +58,6 @@ function normalizeSettings(body) {
   }
 
   if (!ENV_MANAGERS.includes(values.env_manager)) return { error: 'env_manager must be micromamba or conda' };
-  values.msa_use_mmseqs2 = values.msa_use_mmseqs2 ? 1 : 0;
 
   for (const [field, pattern] of Object.entries(PATTERNS)) {
     if (typeof values[field] !== 'string' || !pattern.test(values[field])) return { error: `${field} has an invalid value` };

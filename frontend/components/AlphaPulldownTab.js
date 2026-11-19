@@ -10,7 +10,9 @@
 // either.
 //
 // A project (ProjectBar) owns one set of proteins and ties the three
-// pipeline tabs together: Sequences -> MSA (CPU) -> Co-folding (GPU). The
+// pipeline tabs together: Sequences -> Features (CPU) -> Co-folding (GPU).
+// The Library tab is not tied to a project: it is the proteomes and feature
+// sets every user shares. The
 // stats strip under the tab bar always describes the selected project.
 //
 // Tab visibility is gated by GET /alphapulldown/page-access (see
@@ -20,6 +22,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import ProjectBar from './ProjectBar';
 import StatsStrip from './StatsStrip';
+import LibraryTab from './LibraryTab';
 import MsaTab from './MsaTab';
 import CofoldTab from './CofoldTab';
 import SequencesTab from './SequencesTab';
@@ -31,7 +34,8 @@ import styles from '../styles/AlphaPulldownTab.module.css';
 // stage: a pipeline tab (needs a selected project, shows the stats strip).
 const TABS = [
   { key: 'sequences', label: 'Sequences', stage: 'sequences', component: SequencesTab },
-  { key: 'msa', label: 'MSA (CPU)', stage: 'msa', component: MsaTab },
+  { key: 'library', label: 'Library', component: LibraryTab },
+  { key: 'msa', label: 'Features (CPU)', stage: 'msa', component: MsaTab },
   { key: 'cofold', label: 'Co-folding (GPU)', stage: 'cofold', component: CofoldTab },
   { key: 'setup', label: 'Setup', component: SetupTab }
 ];

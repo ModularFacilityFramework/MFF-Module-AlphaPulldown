@@ -21,6 +21,10 @@ const abcfold = require('../services/abcfoldClient');
 const slurm = require('../services/slurmClient');
 const { httpError, makeHelpers } = require('../services/routeHelpers');
 const cofold = require('../services/cofoldPlan');
+const library = require('../services/libraryService');
+const provenance = require('../services/provenance');
+const { groupsFor } = require('../services/projectProvenance');
+const manifest = require('../../module.manifest.json');
 
 const FEATURES_DIRNAME = 'features';
 const MAX_LISTED_RUNS = 20;
@@ -65,6 +69,14 @@ function optionsOf(run) {
   };
 }
 
+function parseJson(text) {
+  try {
+    return text ? JSON.parse(text) : null;
+  } catch (err) {
+    return null;
+  }
+}
+
 function emptyCounts() {
   return { queued: 0, running: 0, done: 0, failed: 0, cancelled: 0, total: 0 };
 }
@@ -88,7 +100,7 @@ module.exports = function buildRouter(coreApi) {
 
   async function projectRows(conn, project) {
     return conn.query(
-      'SELECT role, name, length, copies, sequence FROM alphapulldown_project_sequences WHERE project_id = ? ORDER BY id',
+      'SELECT role, name, length, copies, sequence, proteome_id FROM alphapulldown_project_sequences WHERE project_id = ? ORDER BY id',
       [project.id]
     );
   }
@@ -237,6 +249,26 @@ module.exports = function buildRouter(coreApi) {
     );
     const runId = Number(insert.insertId);
     try {
+      // Which proteome versions and feature sets the folded proteins come from,
+      // as the project's features folder links them right now.
+      const workspace = await coreApi.getUserWorkspacePath(req.user);
+      const used = new Set(pairs.flatMap(p => [p.bait.name, p.cand ? p.cand.name : null]).filter(Boolean));
+      const { groups, localProteins } = await groupsFor(
+        conn,
+        await library.loadConfig(conn),
+        workspace.active ? path.join(projectDir(workspace.path, project.project_number), FEATURES_DIRNAME) : null,
+        info.rows.filter(r => used.has(r.name))
+      );
+      const record = provenance.cofoldRunRecord({
+        module: { id: manifest.id, version: manifest.version },
+        mode: project.mode,
+        options: { seeds: options.seeds, gpuCount: options.gpuCount, mmseqs2: options.mmseqs2, templates: options.templates, reuseMsa: options.reuseMsa },
+        groups,
+        localProteins,
+        pairs: pairs.length,
+        createdAt: new Date().toISOString()
+      });
+      await conn.query('UPDATE alphapulldown_cofold_runs SET provenance_json = ? WHERE id = ?', [JSON.stringify(record), runId]);
       for (const part of chunks(pairs, INSERT_CHUNK)) {
         await conn.batch(
           'INSERT INTO alphapulldown_cofold_items (run_id, project_id, bait_name, cand_name, len_a, len_b) VALUES (?, ?, ?, ?, ?, ?)',
@@ -443,6 +475,7 @@ module.exports = function buildRouter(coreApi) {
       cancelledAt: run.cancelled_at,
       maxParallel: run.max_parallel,
       options: optionsOf(run),
+      provenance: parseJson(run.provenance_json),
       counts,
       active,
       waiting,

@@ -71,6 +71,7 @@ test('labels read in words, and an unknown label is shown as it is', () => {
     methodText: 'MMseqs2 server search', hardwareText: '8 CPUs, partition cpu_a or cpu_b'
   });
   assert.strictEqual(describeLabels('msa', 'local', 'default/4cpu').hardwareText, '4 CPUs, default partition');
+  assert.match(describeLabels('msa', 'af3', 'cpu/8cpu').methodText, /AlphaFold 3 pipeline/);
   assert.deepStrictEqual(describeLabels('fold', 'af3', ''), { methodText: 'af3', hardwareText: 'not recorded' });
 });
 

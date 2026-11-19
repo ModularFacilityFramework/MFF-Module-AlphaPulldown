@@ -2,7 +2,7 @@
 // settings, one row per user (GET/PUT /alphapulldown/settings). Only ever
 // touches core through the coreApi prop - see docs/MFF-Core_module-core-api.md
 // for the contract.
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import styles from '../styles/SetupTab.module.css';
 
 // type 'number' values are sent as numbers; the backend validates every
@@ -11,9 +11,15 @@ const ENVIRONMENT_FIELDS = [
   { key: 'env_name', label: 'Environment name', type: 'text' },
   {
     key: 'data_dir',
-    label: 'AlphaPulldown database directory (--data_dir) - required before an MSA job can run',
+    label: 'Genetic database directory (--data_dir) - required before a features job can run',
     type: 'text',
     placeholder: '/absolute/path/to/databases'
+  },
+  {
+    key: 'pdb_seqres_path',
+    label: 'pdb_seqres file (blank = look for it in the database directory)',
+    type: 'text',
+    placeholder: '/absolute/path/to/pdb_seqres.txt'
   },
   { key: 'max_template_date', label: 'Template cut-off date (YYYY-MM-DD)', type: 'text' },
   { key: 'slurm_mail_type', label: 'Mail type (optional, e.g. END,FAIL)', type: 'text' }
@@ -47,7 +53,8 @@ function renderField(field, form, updateField) {
 }
 
 function SetupTab({ coreApi }) {
-  const { api } = coreApi;
+  const { api, useAuth, useRoles } = coreApi;
+  const { canManageUsers } = useRoles(useAuth().userData);
   const [form, setForm] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -85,9 +92,11 @@ function SetupTab({ coreApi }) {
   const workspace = form.workspace || { active: false, path: null, reason: null };
 
   return (
+    <>
+    {canManageUsers && <LibrarySettings api={api} />}
     <form className={styles.form} onSubmit={handleSubmit}>
       <p className={styles.hint}>
-        These are your own defaults for the MSA (CPU) stage. Co-folding runs through the ABCFold module and
+        These are your own defaults for the Features (CPU) stage. Co-folding runs through the ABCFold module and
         uses that module&apos;s own settings. Account, email and every project&apos;s files come from your
         core account and core-provisioned workspace.
       </p>
@@ -100,8 +109,7 @@ function SetupTab({ coreApi }) {
       )}
       {!form.data_dir && (
         <p className={styles.submissionNote}>
-          No database directory is set yet. The MSA stage will not run until you set one below
-          (or tick the MMseqs2 option, which does not use it).
+          No database directory is set yet. The Features stage will not run until you set one below.
         </p>
       )}
 
@@ -116,18 +124,13 @@ function SetupTab({ coreApi }) {
         </label>
         {ENVIRONMENT_FIELDS.map(field => renderField(field, form, updateField))}
       </div>
-      <div className={styles.checkboxes}>
-        <label className={styles.checkboxField}>
-          <input
-            type="checkbox"
-            checked={!!form.msa_use_mmseqs2}
-            onChange={e => updateField('msa_use_mmseqs2', e.target.checked ? 1 : 0)}
-          />
-          <span>Use MMseqs2 (public ColabFold API, needs internet from the compute nodes) instead of searching the database directory</span>
-        </label>
-      </div>
+      <p className={styles.hint}>
+        Features are built with AlphaPulldown&apos;s AlphaFold 3 data pipeline, which searches these local databases
+        (it has no MMseqs2 mode). Changing the template cut-off date or the database directory starts a separate
+        feature set in the shared library; the old one is kept.
+      </p>
 
-      <h4 className={styles.sectionTitle}>MSA resources (per protein searched)</h4>
+      <h4 className={styles.sectionTitle}>Feature resources (per protein searched)</h4>
       <div className={styles.grid}>
         {RESOURCE_FIELDS.map(field => renderField(field, form, updateField))}
       </div>
@@ -163,6 +166,67 @@ function SetupTab({ coreApi }) {
 
       <button type="submit" className={styles.saveButton} disabled={saving}>
         {saving ? 'Saving...' : 'Save settings'}
+      </button>
+    </form>
+    </>
+  );
+}
+
+// Staff only: where the one shared library lives and the feature set tag.
+function LibrarySettings({ api }) {
+  const [config, setConfig] = useState(null);
+  const [libraryDir, setLibraryDir] = useState('');
+  const [tag, setTag] = useState('v1');
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(() => api.get('/alphapulldown/library')
+    .then(res => {
+      setConfig(res.data);
+      setLibraryDir(res.data.libraryDir || '');
+      setTag(res.data.featureSetTag || 'v1');
+    })
+    .catch(err => setError(err.response?.data?.error || err.message)), [api]);
+
+  useEffect(() => { load(); }, [load]);
+
+  function save(e) {
+    e.preventDefault();
+    setSaving(true);
+    setError('');
+    setSaved(false);
+    api.put('/alphapulldown/library/config', { libraryDir, featureSetTag: tag })
+      .then(() => { setSaved(true); return load(); })
+      .catch(err => setError(err.response?.data?.error || err.message))
+      .finally(() => setSaving(false));
+  }
+
+  if (!config) return null;
+  return (
+    <form className={styles.form} onSubmit={save}>
+      <h4 className={styles.sectionTitle}>Shared library (staff)</h4>
+      <p className={styles.hint}>
+        One folder holds every UniProt proteome and every feature set, one copy for all users. It must be
+        writable by the account that runs mff-core and by the accounts that run users&apos; Slurm jobs
+        (group-writable, ideally with the group bit inherited). The feature set tag is part of every
+        feature set&apos;s name: change it whenever the genetic databases or the AlphaPulldown software are
+        updated, so features built the old way and the new way never share a folder.
+      </p>
+      <div className={styles.grid}>
+        <label className={styles.field}>
+          <span>Library folder</span>
+          <input type="text" value={libraryDir} placeholder="/absolute/path/to/alphapulldown_library" onChange={e => { setLibraryDir(e.target.value); setSaved(false); }} />
+        </label>
+        <label className={styles.field}>
+          <span>Feature set tag</span>
+          <input type="text" value={tag} onChange={e => { setTag(e.target.value); setSaved(false); }} />
+        </label>
+      </div>
+      {error && <p className={styles.fieldError}>{error}</p>}
+      {saved && <p className={styles.success}>Library settings saved.</p>}
+      <button type="submit" className={styles.saveButton} disabled={saving || !libraryDir.trim()}>
+        {saving ? 'Saving...' : 'Save library settings'}
       </button>
     </form>
   );

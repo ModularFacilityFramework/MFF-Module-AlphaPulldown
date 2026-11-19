@@ -2,7 +2,7 @@
 
 An [MFF-core](../mff-core) feature module for running AlphaPulldown jobs on a Slurm cluster. Users define their inputs in the UI; this module generates the job's input files and sbatch script, writes them into the user's core workspace, and submits the job to the Slurm module.
 
-> **Status: in development.** The module is built in phases: (0) project shell, settings and statistics, done; (1) Sequences tab (UniProt search, FASTA, proteome download and browsing, selection, AlphaPulldown files), done; (2) anonymised speed database and estimates in the stats strip, done (estimates read "no estimate yet" until the MSA and Co-folding tabs have recorded finished jobs); (3) MSA (CPU) tab, done; (4) Co-folding (GPU) tab through the ABCFold module, done (it assumes the ABCFold module's API, which is not documented yet - see the Co-folding section); (5) staff Speed statistics tab and polish, done.
+> **Status: in development.** The module is built in phases: (0) project shell, settings and statistics, done; (1) Sequences tab (UniProt search, FASTA, proteome download and browsing, selection, AlphaPulldown files), done; (2) anonymised speed database and estimates in the stats strip, done (estimates read "no estimate yet" until the Features and Co-folding tabs have recorded finished jobs); (3) Features (CPU) tab, done; (4) Co-folding (GPU) tab through the ABCFold module, done (it assumes the ABCFold module's API, which is not documented yet - see the Co-folding section); (5) staff Speed statistics tab and polish, done.
 
 ## Quick start
 
@@ -26,11 +26,38 @@ docs/                       # symlink to mff-core's own docs/ - a shared space c
                             # files in that shared folder, not duplicated here.
 ```
 
-## MSA stage
+## Shared library
 
-The MSA (CPU) tab runs AlphaPulldown's `create_individual_features.py` for the project's distinct proteins. A run is **one Slurm job** (not a job array): its script searches `Proteins searched at once` proteins in parallel with `xargs -P` inside a single allocation, so it asks for that many times the per-protein CPUs and memory, and a time limit of the per-protein limit times the number of rounds. Setup holds those numbers, the environment and the database directory (or MMseqs2); nothing about the cluster is assumed. A job array would let Slurm place each protein separately, but the Slurm module's array handling is unconfirmed (`requests/S1-slurm-array-jobs.md`).
+Every UniProt proteome used here lives **once**, in one folder shared by all MFF-core users (`library_dir`, set by staff in Setup, e.g. `/home/linuxhomes/software/alphapulldown_library/`), not once per user. The **Library** tab lists them and what each one is; anyone can add a proteome (a release the library already holds is not downloaded again), staff can remove one that no project uses.
 
-Each run has its own folder, `module-AlphaPulldown/P<n>/msa/run-<id>/`, in the user's workspace: `submit.sh`, `run_one.sh`, `msa_input.fasta`, `msa_names.txt`, `msa_lengths.txt`, `timings.tsv`, and one log per protein in `logs/`. Feature files go to `P<n>/features/`, shared by every run of the project. A protein whose features already exist is skipped (unless "search again" is ticked), and failures are reported by name with their log. `timings.tsv` records index, length, seconds, exit code and status - no names - and is copied into the anonymised speed database the first time the run is seen finished.
+```
+<library_dir>/
+  README.txt
+  proteomes/<UPID>/<UniProt release>/<all|reviewed>/proteome.fasta, metadata.json
+  features/<UPID>_<release>_<subset>_<tag>_<config hash>/set.json, <name>_af3_input.json.xz, .locks/
+```
+
+- **A proteome version is immutable.** UniProt release `2026_04` and `2026_05` of the same proteome are two folders; nothing is overwritten. `metadata.json` (and the matching row in `alphapulldown_library_proteomes`) records: organism, taxon, UniProt proteome id and type, genome assembly, BUSCO completeness, **UniProt release and its date** (from the `X-UniProt-Release` headers of the download), content (all or reviewed), entry count, file size and **SHA-256**, the source (`rest.uniprot.org`), the download date and the module version.
+- **A feature set** holds the input features of ONE proteome version built under ONE configuration: format (AlphaPulldown's AlphaFold 3 input JSON), template cut-off date, genetic database folder and the staff **feature set tag**. A different configuration is a different folder, so features built two ways never mix. `set.json` records that configuration and, written by the first job that builds into the set, the **software and database versions**: AlphaPulldown, AlphaFold 3 and JAX versions, and the name, size and date of every database file the pipeline reads (UniRef90, MGnify, UniProt, BFD, PDB mmCIF, pdb_seqres). Every later job checks that its own environment has the same fingerprint before adding anything and stops (exit 3, with the differences in `slurm.err`) if the databases or software changed: staff then change the tag in Setup so a new set starts.
+- A project that picks proteins from a library proteome keeps `proteome_id` and the accession with each protein, so it is tied to that exact version.
+
+## Features stage
+
+The Features (CPU) tab runs AlphaPulldown's `create_individual_features.py --data_pipeline=alphafold3 --compress_features=True` for the project's distinct proteins against the cluster's genetic databases (the installed AlphaPulldown 2.9 with AlphaFold 3's data pipeline, which has no MMseqs2 mode; `pdb_seqres` sits in a subfolder and is passed explicitly). A run is **one Slurm job**: its script searches `Proteins searched at once` proteins in parallel with `xargs -P` inside a single allocation (a job array would need the Slurm module to confirm array handling, `requests/S1-slurm-array-jobs.md`).
+
+- **Proteins from a library proteome** are built into that proteome version's feature set - once for everybody, under a per-protein lock so two users asking for the same protein compute it once - and **symlinked** into the project's `features/` folder (no copy). A protein already in the set is only linked. "Search again" never rebuilds a shared feature.
+- **The user's own pasted sequences** are built in the project's own `features/` folder as before.
+- Before searching, the job runs `capture_env.py`, which records the software and databases it really runs with in `environment.json` and checks the feature sets as described above.
+- Each run has its own folder, `module-AlphaPulldown/P<n>/msa/run-<id>/`: `submit.sh`, `run_one.sh`, `capture_env.py`, `msa_input.fasta`, `msa_names.txt`, `msa_lengths.txt`, `msa_targets.txt`, `sets.txt`, `timings.tsv`, `environment.json`, `provenance.json` and one log per protein in `logs/`. `timings.tsv` records index, length, seconds, exit code and status - no names - and is copied into the anonymised speed database the first time the run is seen finished.
+- The features are AlphaPulldown/AlphaFold 3 input JSON files (one protein chain each, MSA and templates filled). **The ABCFold module does not accept them yet**: it builds its own input from sequences only (confirmed with its session). The preferred hand-off, a per-chain `featuresPath` on `POST /jobs` merged into the generated input, has been put to that session; until it exists the prediction stage sends sequences only.
+
+## Provenance
+
+Every run records exactly what it used, so a methods section can be written from it:
+
+- `alphapulldown_msa_runs.provenance_json` and `provenance.json` in the run folder: the module version, the settings (environment, database folder, pdb_seqres, template cut-off), one entry per proteome version used (UPID, organism, taxon, UniProt release and date, content, entry count, SHA-256) with its feature set (id, key, tag, format, template cut-off), the number of proteins that were the user's own, and - added when the job ends - the software versions and database files the job itself recorded.
+- `alphapulldown_cofold_runs.provenance_json`: the same proteome/feature-set facts for the proteins a prediction run folds (read from where the project's feature links point, so it is what is on disk), plus the options chosen.
+- `GET /alphapulldown/projects/:id/provenance` and the **Methods** panel under the Features and Co-folding tabs write a paragraph from the project's latest finished feature run and latest prediction run, with the AlphaPulldown2 citation (Molodenskiy et al. 2025, Bioinformatics, doi:10.1093/bioinformatics/btaf115). A fact that was not recorded is listed as missing, never filled in.
 
 ## Co-folding stage
 
@@ -40,7 +67,7 @@ The Co-folding (GPU) tab folds every bait-candidate pair (or, for the other mode
 
 **The ABCFold API is assumed, not documented** (`requests/A2-abcfold-documented-external-surface.md`). `backend/services/abcfoldClient.js` is the only place that knows it: `POST /jobs` with name, `sequences` (`{type, id, sequence}`, one chain per copy), `modelSeeds`, `models: ['alphafold3']`, `templates`, `gpuCount` and optionally `mmseqs2`, answering `{id, status, slurm_job_id}`; `GET /jobs/:id/status` answering `state`, `submittedAt`, `startedAt`, `endedAt`. If the real module differs, change that file.
 
-**MSA reuse needs two things that do not exist yet.** The ABCFold module must accept a per-chain MSA path (`requests/A1-abcfold-per-chain-msa.md`; until then it ignores the field and searches for its own). And the MSA stage only leaves a usable file when it searched with MMseqs2: AlphaPulldown writes `<features>/<name>.a3m` then, while a local search leaves AlphaFold2's own formats in a folder, which are not an A3M. The tab passes the path only for a regular `<name>.a3m` file (never a symlink or a folder), and only when the "hand over" box is ticked.
+**MSA reuse is not available yet.** The ABCFold module accepts no precomputed MSA or features (`requests/A1-abcfold-per-chain-msa.md` is still open). The Features stage no longer writes `<name>.a3m` files (the AlphaFold 3 pipeline leaves `<name>_af3_input.json.xz` instead), so the "hand over the MSAs" box finds nothing to hand over and the prediction stage searches for its own MSAs.
 
 Each pair's end state becomes one speed sample (stage `fold`, both lengths, method label such as `s2-mmseqs2`, hardware `gpu<N>`, run and queue seconds from the Slurm timestamps ABCFold reports, outcome ok/oom/timeout/failed). Cancelled and never-submitted pairs give no sample.
 

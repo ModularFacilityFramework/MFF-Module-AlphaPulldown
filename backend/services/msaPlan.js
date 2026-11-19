@@ -1,6 +1,17 @@
-// What one MSA run is: which proteins, what the job asks Slurm for, and the
-// two scripts that do the work. Pure functions - no database, no disk, no
-// Slurm - so they are unit-tested without a running mff-core.
+/* eslint-disable no-template-curly-in-string -- shell snippets are written as plain strings */
+// What one feature run is: which proteins, what the job asks Slurm for, and
+// the scripts that do the work. The stage is AlphaPulldown's first step -
+// create_individual_features.py with the AlphaFold 3 data pipeline, which
+// searches the cluster's genetic databases and writes one
+// <name>_af3_input.json.xz of input features per protein. Pure functions - no
+// database, no disk, no Slurm - so they are unit-tested without a running
+// mff-core.
+//
+// Proteins picked from a library proteome are built INTO the shared library
+// (one copy for every user, in the feature set of that proteome version) and
+// only linked into the project's features/ folder; a protein that is already
+// there is just linked. The user's own pasted sequences are built in the
+// project's folder. See libraryPaths.js and provenance.js.
 //
 // One run is ONE Slurm job. Its script runs AlphaPulldown's
 // create_individual_features.py once per protein, `parallel` proteins at a
@@ -12,6 +23,7 @@
 // the file can feed the anonymised speed database as it stands.
 
 const { formatFasta } = require('./fastaTools');
+const { CAPTURE_SCRIPT } = require('./provenance');
 
 const MAX_DAYS = 999;
 const MEM_UNITS_TO_MB = { K: 1 / 1024, M: 1, G: 1024, T: 1024 * 1024 };
@@ -83,9 +95,7 @@ function msaResources(settings, toDo) {
 // Reasons a run cannot start yet, as sentences for the user.
 function msaProblems(settings) {
   const problems = [];
-  if (!settings.msa_use_mmseqs2 && !settings.data_dir) {
-    problems.push('Set the AlphaPulldown database directory in Setup, or tick the MMseqs2 option there.');
-  }
+  if (!settings.data_dir) problems.push('Set the genetic database directory in Setup first.');
   return problems;
 }
 
@@ -97,10 +107,24 @@ function uniqueProteins(rows) {
   const conflicts = new Set();
   rows.forEach(r => {
     const known = byName.get(r.name);
-    if (!known) byName.set(r.name, { name: r.name, length: r.length, sequence: r.sequence });
-    else if (known.sequence !== r.sequence) conflicts.add(r.name);
+    if (!known) {
+      byName.set(r.name, { name: r.name, length: r.length, sequence: r.sequence, proteomeId: r.proteome_id ? Number(r.proteome_id) : null });
+    } else if (known.sequence !== r.sequence) {
+      conflicts.add(r.name);
+    } else if (!known.proteomeId && r.proteome_id) {
+      known.proteomeId = Number(r.proteome_id);
+    }
   });
   return { proteins: [...byName.values()], conflicts: [...conflicts] };
+}
+
+// The files create_individual_features.py leaves for one protein: plain or
+// xz-compressed AlphaFold 3 features. Used to tell which proteins are done.
+const FEATURE_FILE = /^(.+)_af3_input\.json(\.xz)?$/;
+
+function featureNameOf(fileName) {
+  const match = FEATURE_FILE.exec(fileName);
+  return match ? match[1] : null;
 }
 
 // timings.tsv -> [{ index, length, seconds, exit, status }]. Lines that do
@@ -152,27 +176,35 @@ function activationLines(settings) {
 }
 
 // The flags of one create_individual_features.py call. $i is the 1-based
-// position of the protein in msa_input.fasta. --use_precomputed_msas lets a
-// retry reuse MSA files an earlier attempt already saved; a forced redo
-// starts again from nothing.
-function featuresArgs(settings, { featuresDir, redo }) {
+// position of the protein in msa_input.fasta and $out the folder this protein
+// is built into. --skip_existing leaves a finished protein alone;
+// --compress_features writes <name>_af3_input.json.xz (AlphaPulldown reads it
+// back transparently). AlphaFold 3's pipeline searches the local databases
+// only - it has no MMseqs2 mode - and pdb_seqres sits in a subfolder here, so
+// its path is passed explicitly.
+function featuresArgs(settings, { redo }) {
   const args = [
+    '--data_pipeline=alphafold3',
     '--fasta_paths=msa_input.fasta',
-    `--output_dir=${shellQuote(featuresDir)}`,
+    '--output_dir="$out"',
+    `--data_dir=${shellQuote(settings.data_dir)}`,
     `--max_template_date=${settings.max_template_date}`,
-    '--save_msa_files=True',
+    '--compress_features=True',
     '--seq_index="$i"'
   ];
-  if (settings.msa_use_mmseqs2) args.push('--use_mmseqs2=True');
-  else args.push(`--data_dir=${shellQuote(settings.data_dir)}`);
-  if (!redo) args.push('--skip_existing=True', '--use_precomputed_msas=True');
+  if (settings.pdb_seqres_path) args.push(`--pdb_seqres_database_path=${shellQuote(settings.pdb_seqres_path)}`);
+  if (!redo) args.push('--skip_existing=True');
   return args;
 }
 
 // The script xargs calls once per protein ($1 = position in msa_input.fasta).
 // It skips a protein whose features already exist (recorded as 'skipped'),
-// times the search and appends one line to timings.tsv. It exits non-zero
-// when the search failed, so the job as a whole ends FAILED if any did.
+// times the search and appends one line to timings.tsv. A protein built into
+// the shared library is never rebuilt - not even by "search again" - and is
+// searched under a lock, so two users asking for the same protein at the same
+// moment compute it once. Every protein ends up linked into the project's
+// features folder. It exits non-zero when the search failed, so the job as a
+// whole ends FAILED if any did.
 function buildRunOneScript(settings, { featuresDir, redo }) {
   const lines = [
     '#!/bin/bash',
@@ -180,27 +212,49 @@ function buildRunOneScript(settings, { featuresDir, redo }) {
     'i="$1"',
     'name=$(sed -n -e "$i p" msa_names.txt)',
     'len=$(sed -n -e "$i p" msa_lengths.txt)',
-    `features=${shellQuote(featuresDir)}`
-  ];
-  if (!redo) {
-    lines.push(
-      'if [ -e "$features/$name.pkl" ] || [ -e "$features/$name.pkl.xz" ]; then',
-      '  printf \'%s\\t%s\\t0\\t0\\tskipped\\n\' "$i" "$len" >> timings.tsv',
-      '  exit 0',
-      'fi'
-    );
-  }
-  lines.push(
+    'out=$(sed -n -e "$i p" msa_targets.txt)',
+    `link=${shellQuote(featuresDir)}`,
+    `redo=${redo ? 1 : 0}`,
+    // Shared files are group-writable so every user's job can add to the set.
+    'umask 002',
+    'mkdir -p "$link"',
+    '',
+    'have() { [ -e "$out/${name}_af3_input.json.xz" ] || [ -e "$out/${name}_af3_input.json" ]; }',
+    'link_features() {',
+    '  [ "$out" = "$link" ] && return 0',
+    '  for ext in json.xz json; do',
+    '    [ -e "$out/${name}_af3_input.$ext" ] && ln -sfn "$out/${name}_af3_input.$ext" "$link/${name}_af3_input.$ext"',
+    '  done',
+    '  return 0',
+    '}',
+    'skipped() {',
+    '  link_features',
+    '  printf \'%s\\t%s\\t0\\t0\\tskipped\\n\' "$i" "$len" >> timings.tsv',
+    '  exit 0',
+    '}',
+    '',
+    '# Shared features are never rebuilt; own features only when asked to.',
+    'if [ "$out" != "$link" ] || [ "$redo" -eq 0 ]; then',
+    '  have && skipped',
+    'fi',
+    'if [ "$out" != "$link" ]; then',
+    '  mkdir -p "$out/.locks"',
+    '  exec 9>"$out/.locks/$name.lock"',
+    '  flock 9',
+    '  have && skipped',
+    'fi',
+    '',
     'start=$(date +%s)',
-    `create_individual_features.py ${featuresArgs(settings, { featuresDir, redo }).join(' ')} > "logs/$i.log" 2>&1`,
+    `create_individual_features.py ${featuresArgs(settings, { redo }).join(' ')} > "logs/$i.log" 2>&1`,
     'code=$?',
     'end=$(date +%s)',
     'status=ok',
     'if [ "$code" -eq 137 ]; then status=oom; elif [ "$code" -ne 0 ]; then status=failed; fi',
+    '[ "$code" -eq 0 ] && link_features',
     'printf \'%s\\t%s\\t%s\\t%s\\t%s\\n\' "$i" "$len" "$((end - start))" "$code" "$status" >> timings.tsv',
     '[ "$code" -eq 0 ]',
     ''
-  );
+  ];
   return lines.join('\n');
 }
 
@@ -234,7 +288,13 @@ function buildSubmitScript({ slug, settings, email, resources, count }) {
     '',
     ...activationLines(settings),
     '',
+    'umask 002',
     'mkdir -p logs',
+    '# Record the software and databases this job really runs with, and check',
+    '# them against the shared feature sets it builds into (stops on a mismatch).',
+    `python capture_env.py environment.json ${shellQuote(settings.data_dir)} ${shellQuote(settings.pdb_seqres_path || '-')} $(cat sets.txt)`,
+    'code=$?',
+    'if [ "$code" -ne 0 ]; then echo "Stopped before searching: environment check failed (exit $code)." >&2; exit "$code"; fi',
     `echo "Searching ${count} proteins, ${resources.parallel} at a time"`,
     `seq 1 ${count} | xargs -P ${resources.parallel} -n 1 bash ./run_one.sh`,
     ''
@@ -242,14 +302,21 @@ function buildSubmitScript({ slug, settings, email, resources, count }) {
   return lines.join('\n');
 }
 
-// Everything written into a run's folder, as { name: content }.
+// Everything written into a run's folder, as { name: content }. A protein
+// with an outDir is built into (and linked from) that shared feature set
+// folder; the others are built in featuresDir itself.
 function buildRunFiles({ slug, settings, email, resources, proteins, featuresDir, redo }) {
+  const targets = proteins.map(p => p.outDir || featuresDir);
+  const sets = [...new Set(targets.filter(t => t !== featuresDir))];
   return {
     'submit.sh': buildSubmitScript({ slug, settings, email, resources, count: proteins.length }),
     'run_one.sh': buildRunOneScript(settings, { featuresDir, redo }),
+    'capture_env.py': CAPTURE_SCRIPT,
     'msa_input.fasta': formatFasta(proteins),
     'msa_names.txt': proteins.map(p => `${p.name}\n`).join(''),
-    'msa_lengths.txt': proteins.map(p => `${p.length}\n`).join('')
+    'msa_lengths.txt': proteins.map(p => `${p.length}\n`).join(''),
+    'msa_targets.txt': targets.map(t => `${t}\n`).join(''),
+    'sets.txt': sets.map(t => `${t}\n`).join('')
   };
 }
 
@@ -265,6 +332,8 @@ module.exports = {
   parseTimings,
   progressOf,
   samplesFromTimings,
+  featureNameOf,
+  activationLines,
   shellQuote,
   buildRunOneScript,
   buildSubmitScript,

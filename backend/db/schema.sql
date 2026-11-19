@@ -33,14 +33,16 @@ CREATE TABLE IF NOT EXISTS alphapulldown_settings (
   -- in the generated sbatch script. Not an ENUM: this file has no
   -- migrations, ever, and a free-form default is easier to extend later.
   env_manager VARCHAR(20) NOT NULL DEFAULT 'micromamba',
-  env_name VARCHAR(255) NOT NULL DEFAULT 'alphapulldown',
+  env_name VARCHAR(255) NOT NULL DEFAULT 'alphafold3_alphapulldown',
   -- AlphaFold database directory passed to create_individual_features.py as
   -- --data_dir (jackhmmer/hhblits searches and templates). Empty until the
   -- user sets it in Setup - the MSA stage refuses to run without it.
-  data_dir VARCHAR(500) NOT NULL DEFAULT '',
-  -- 1 = ask the public ColabFold MMseqs2 API for MSAs (needs internet from
-  -- the compute node) instead of searching data_dir.
-  msa_use_mmseqs2 TINYINT(1) NOT NULL DEFAULT 0,
+  data_dir VARCHAR(500) NOT NULL DEFAULT '/home/linuxhomes/software/genetic_db',
+  -- The installed AlphaPulldown (2.9) builds features with AlphaFold 3's data
+  -- pipeline, which searches the local databases only (it has no MMseqs2
+  -- mode). Its pdb_seqres file sits in a subfolder here, so it is passed
+  -- explicitly; empty = let the tool look in data_dir.
+  pdb_seqres_path VARCHAR(500) NOT NULL DEFAULT '/home/linuxhomes/software/genetic_db/pdb_seqres/pdb_seqres.txt',
   max_template_date VARCHAR(10) NOT NULL DEFAULT '2050-01-01',
   -- Resource request of ONE MSA array task (one protein).
   -- Empty = omit --partition and let the cluster pick its default.
@@ -65,6 +67,63 @@ CREATE TABLE IF NOT EXISTS alphapulldown_settings (
   -- coreApi.authenticateToken) instead.
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- The shared library: ONE row (id 1), written by staff in Setup. library_dir
+-- is the folder that holds every proteome and every feature set, one copy for
+-- all users. feature_set_tag is bumped by staff whenever the genetic
+-- databases or the AlphaPulldown software are updated, so features built with
+-- the old and the new setup never share a folder.
+CREATE TABLE IF NOT EXISTS alphapulldown_library_config (
+  id TINYINT NOT NULL PRIMARY KEY,
+  library_dir VARCHAR(500) NOT NULL DEFAULT '',
+  feature_set_tag VARCHAR(32) NOT NULL DEFAULT 'v1',
+  updated_by BIGINT NULL,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- One row per proteome VERSION in the library: a UniProt proteome id at one
+-- UniProt release, either all entries or reviewed (Swiss-Prot) only. Files
+-- are immutable; a new release is a new row. metadata.json beside the FASTA
+-- holds the same facts (and more) on disk; this row is the index the tab
+-- lists and the key sequences and runs point at. sha256 is of proteome.fasta.
+CREATE TABLE IF NOT EXISTS alphapulldown_library_proteomes (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  upid VARCHAR(12) NOT NULL,
+  release_name VARCHAR(10) NOT NULL,
+  release_date VARCHAR(30) NOT NULL DEFAULT '',
+  subset VARCHAR(10) NOT NULL DEFAULT 'all',
+  organism VARCHAR(255) NOT NULL DEFAULT '',
+  tax_id INT NULL,
+  proteome_type VARCHAR(50) NOT NULL DEFAULT '',
+  entries INT NOT NULL DEFAULT 0,
+  bytes BIGINT NOT NULL DEFAULT 0,
+  sha256 CHAR(64) NOT NULL DEFAULT '',
+  source VARCHAR(120) NOT NULL DEFAULT '',
+  metadata_json MEDIUMTEXT NULL,
+  downloaded_at DATETIME NOT NULL,
+  added_by BIGINT NULL,
+  UNIQUE KEY uniq_proteome_version (upid, release_name, subset)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- One row per feature set: the AlphaPulldown input features of one proteome
+-- version under one build configuration (format, template cut-off, database
+-- folder, staff tag). set_key is the folder name under <library>/features/.
+-- The software and database versions the files were built with are recorded
+-- by the first job that builds into the set, in set.json beside the files,
+-- and every later job checks them before adding anything.
+CREATE TABLE IF NOT EXISTS alphapulldown_library_feature_sets (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  proteome_id BIGINT NOT NULL,
+  set_key VARCHAR(120) NOT NULL,
+  tag VARCHAR(32) NOT NULL,
+  format VARCHAR(20) NOT NULL DEFAULT 'af3_json',
+  max_template_date VARCHAR(10) NOT NULL,
+  data_dir VARCHAR(500) NOT NULL,
+  created_by BIGINT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_set_key (set_key),
+  KEY idx_proteome_id (proteome_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- A project owns one set of proteins and ties the three stages together
 -- (sequences -> MSA -> co-folding). project_number is per-owner sequential
 -- (1, 2, 3, ...), shown as "P<number>" and used to name the project's own
@@ -84,7 +143,9 @@ CREATE TABLE IF NOT EXISTS alphapulldown_projects (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- The proteins chosen for a project - only the selected ones, never a whole
--- downloaded proteome (that stays a file in the user's workspace).
+-- proteome (those live once in the shared library). proteome_id/accession
+-- tie a protein picked from a library proteome to that exact proteome
+-- version; they are NULL for pasted or single-UniProt sequences.
 -- role: 'bait' or 'candidate' for pulldown, 'all' for all_vs_all and
 -- homo_oligomer. name is the AlphaPulldown-safe identifier (it becomes the
 -- feature file name and the entry in the protein-list files).
@@ -100,6 +161,8 @@ CREATE TABLE IF NOT EXISTS alphapulldown_project_sequences (
   sequence MEDIUMTEXT NOT NULL,
   -- Copy number inside the complex (homo-oligomer state); 1 for a monomer.
   copies INT NOT NULL DEFAULT 1,
+  proteome_id BIGINT NULL,
+  accession VARCHAR(30) NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uniq_project_role_name (project_id, role, name),
   KEY idx_project_id (project_id)
@@ -128,6 +191,11 @@ CREATE TABLE IF NOT EXISTS alphapulldown_msa_runs (
   redo TINYINT(1) NOT NULL DEFAULT 0,
   method VARCHAR(50) NOT NULL DEFAULT '',
   hardware VARCHAR(100) NOT NULL DEFAULT '',
+  -- Everything needed to write the methods of this run: which proteome
+  -- versions and feature sets it used, the settings, and (added when the job
+  -- ends) the software and database versions the job itself recorded. The
+  -- same text is in provenance.json in the run's folder. See provenance.js.
+  provenance_json MEDIUMTEXT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   started_at DATETIME NULL,
   ended_at DATETIME NULL,
@@ -156,6 +224,9 @@ CREATE TABLE IF NOT EXISTS alphapulldown_cofold_runs (
   reuse_msa TINYINT(1) NOT NULL DEFAULT 0,
   method VARCHAR(50) NOT NULL DEFAULT '',
   hardware VARCHAR(100) NOT NULL DEFAULT '',
+  -- The proteome versions and feature sets of the project's proteins when the
+  -- run was created, plus the options asked for (see provenance.js).
+  provenance_json MEDIUMTEXT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   cancelled_at DATETIME NULL,
   KEY idx_project_id (project_id)

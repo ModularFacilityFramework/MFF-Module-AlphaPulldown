@@ -103,7 +103,8 @@ function describeLabels(stage, method, hardware) {
   let methodText = method || 'not recorded';
   let hardwareText = hardware || 'not recorded';
   if (stage === 'msa') {
-    if (method === 'mmseqs2') methodText = 'MMseqs2 server search';
+    if (method === 'af3') methodText = 'Feature search (AlphaFold 3 pipeline, local databases)';
+    else if (method === 'mmseqs2') methodText = 'MMseqs2 server search';
     else if (method === 'local') methodText = 'Local database search';
     const parts = /^(.+)\/(\d+)cpu$/.exec(hardware);
     if (parts) hardwareText = `${parts[2]} CPUs, ${parts[1] === 'default' ? 'default partition' : `partition ${parts[1].replace(/\+/g, ' or ')}`}`;
