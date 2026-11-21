@@ -4,6 +4,7 @@
 // the app can also suggest the organisms of the chains' UniProt entries. The
 // user chooses.
 import React, { useState } from 'react';
+import { usePageState } from '../utils/pageState';
 import shared from '../styles/SequencesTab.module.css';
 import styles from '../styles/TargetTab.module.css';
 
@@ -12,8 +13,8 @@ function describeLibrary(held) {
   return `in the shared library (${held.map(h => `${h.release}, ${h.subset}`).join('; ')})`;
 }
 
-function TargetGenome({ api, genome, chains, readOnly, needsLibrary, onChoose, onAddToLibrary, onCheckAgain, addingToLibrary, libraryMessage }) {
-  const [text, setText] = useState('');
+function TargetGenome({ api, stateKey, genome, chains, readOnly, needsLibrary, onChoose, onAddToLibrary, onCheckAgain, addingToLibrary, libraryMessage }) {
+  const [text, setText] = usePageState(`${stateKey}:genome-search`, '');
   const [results, setResults] = useState(null);
   const [via, setVia] = useState('search');
   const [busy, setBusy] = useState(false);

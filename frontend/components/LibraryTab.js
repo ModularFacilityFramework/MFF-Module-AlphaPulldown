@@ -5,6 +5,7 @@
 // exactly what the files are, so a job that used them can be described in a
 // methods section. Only ever touches core through the coreApi prop.
 import React, { useCallback, useEffect, useState } from 'react';
+import { usePageState } from '../utils/pageState';
 import styles from '../styles/SequencesTab.module.css';
 
 const POLL_MS = 2000;
@@ -83,11 +84,12 @@ function LibraryTab({ coreApi }) {
   const { canManageUsers } = useRoles(useAuth().userData);
   const [library, setLibrary] = useState(null);
   const [error, setError] = useState('');
-  const [query, setQuery] = useState('');
-  const [reviewedOnly, setReviewedOnly] = useState(true);
-  const [found, setFound] = useState(null);
+  // Search text, filter, results and the opened proteome are remembered per user.
+  const [query, setQuery] = usePageState('library:query', '');
+  const [reviewedOnly, setReviewedOnly] = usePageState('library:reviewed-only', true);
+  const [found, setFound] = usePageState('library:found', null);
   const [finding, setFinding] = useState(false);
-  const [open, setOpen] = useState(null);
+  const [open, setOpen] = usePageState('library:open', null);
 
   const load = useCallback(() => api.get('/alphapulldown/library')
     .then(res => setLibrary(res.data))

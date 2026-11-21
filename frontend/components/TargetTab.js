@@ -1,7 +1,8 @@
 // Target tab: the target of the selected project, plus - for developers and
 // administrators - every user's targets to open read-only.
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import TargetEditor from './TargetEditor';
+import { usePageState } from '../utils/pageState';
 import shared from '../styles/SequencesTab.module.css';
 
 function when(value) {
@@ -55,10 +56,16 @@ function StaffOverview({ api, onOpen }) {
 function TargetTab({ coreApi, project, targetId, onChanged, onSaved, isStaff }) {
   // A staff member who opened somebody else's target from the overview;
   // null = the selected project's own target.
-  const [viewing, setViewing] = useState(null);
+  // Remembered across leaving and reloading (a target that is gone shows its
+  // error with a Back button).
+  const [viewing, setViewing] = usePageState('target-viewing', null);
   const projectId = project ? project.id : null;
 
-  useEffect(() => { setViewing(null); }, [projectId]);
+  // Switching project goes back to that project's own target (not on first show).
+  const shownProject = useRef(projectId);
+  useEffect(() => {
+    if (shownProject.current !== projectId) { shownProject.current = projectId; setViewing(null); }
+  }, [projectId, setViewing]);
 
   if (viewing) {
     return (

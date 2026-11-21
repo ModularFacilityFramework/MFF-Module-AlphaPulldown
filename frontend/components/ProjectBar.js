@@ -3,6 +3,7 @@
 // are handed up (onCreate/onDelete return promises) so AlphaPulldownTab.js
 // stays the single owner of the project list.
 import React, { useState } from 'react';
+import { usePageState } from '../utils/pageState';
 import styles from '../styles/ProjectBar.module.css';
 
 export const MODE_LABELS = {
@@ -12,9 +13,10 @@ export const MODE_LABELS = {
 };
 
 function ProjectBar({ projects, currentId, onSelect, onCreate, onDelete }) {
-  const [creating, setCreating] = useState(false);
-  const [name, setName] = useState('');
-  const [mode, setMode] = useState('pulldown');
+  // The "new project" form and what was typed in it are remembered.
+  const [creating, setCreating] = usePageState('project-bar:creating', false);
+  const [name, setName] = usePageState('project-bar:name', '');
+  const [mode, setMode] = usePageState('project-bar:mode', 'pulldown');
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');

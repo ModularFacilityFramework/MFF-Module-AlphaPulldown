@@ -5,6 +5,7 @@
 // match and accepts it (or removes the model). It is not used for structure
 // prediction at first - target and baits are co-folded.
 import React, { useState } from 'react';
+import { usePageState } from '../utils/pageState';
 import shared from '../styles/SequencesTab.module.css';
 import styles from '../styles/TargetTab.module.css';
 
@@ -20,10 +21,10 @@ function when(value) {
   return value ? new Date(value).toLocaleString('en-GB') : '';
 }
 
-function TargetModel({ api, targetId, canChange, model, firstAccession, readOnly, onPayload }) {
-  const [pdbId, setPdbId] = useState('');
-  const [afAccession, setAfAccession] = useState('');
-  const [uploadSource, setUploadSource] = useState('upload');
+function TargetModel({ api, stateKey, targetId, canChange, model, firstAccession, readOnly, onPayload }) {
+  const [pdbId, setPdbId] = usePageState(`${stateKey}:model-pdb`, '');
+  const [afAccession, setAfAccession] = usePageState(`${stateKey}:model-alphafold`, '');
+  const [uploadSource, setUploadSource] = usePageState(`${stateKey}:model-source`, 'upload');
   const [replacing, setReplacing] = useState(false);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');

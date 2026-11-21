@@ -113,11 +113,18 @@ module.exports = function buildRouter(coreApi) {
     return { row, project: projects[0], owner: allow(projects[0], req, write) };
   }
 
+  // People are shown as "First Last (username)" (core's UI rule); a user
+  // with no name on record is shown by username alone.
+  function personLabel(user) {
+    if (!user) return '';
+    const name = [user.first_name, user.last_name].filter(Boolean).join(' ').trim();
+    return name ? `${name} (${user.username})` : user.username;
+  }
+
   async function ownerName(ownerId) {
     try {
       const users = await coreApi.listUsers();
-      const user = users.find(u => Number(u.id) === Number(ownerId));
-      return user ? user.username : '';
+      return personLabel(users.find(u => Number(u.id) === Number(ownerId)));
     } catch (err) {
       return '';
     }
@@ -485,6 +492,11 @@ module.exports = function buildRouter(coreApi) {
     } catch (err) {
       users = [];
     }
+    // listUsers() is already sorted by first name, then last name: list the
+    // owners in that order, each one's targets newest first.
+    const rank = new Map(users.map((u, i) => [Number(u.id), i]));
+    const position = r => (rank.has(Number(r.owner_id)) ? rank.get(Number(r.owner_id)) : users.length);
+    rows.sort((a, b) => position(a) - position(b));
     res.json({
       targets: rows.map(r => ({
         targetId: Number(r.id),
@@ -493,7 +505,7 @@ module.exports = function buildRouter(coreApi) {
         projectName: r.project_name,
         name: r.name,
         ownerId: Number(r.owner_id),
-        ownerName: (users.find(u => Number(u.id) === Number(r.owner_id)) || {}).username || '',
+        ownerName: personLabel(users.find(u => Number(u.id) === Number(r.owner_id))),
         status: r.status,
         genome: r.genome_upid ? `${r.genome_organism || ''} (${r.genome_upid})`.trim() : '',
         chains: Number(r.chain_count),

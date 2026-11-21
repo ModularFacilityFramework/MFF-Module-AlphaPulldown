@@ -2,6 +2,7 @@
 // this module's other tabs. Only ever touches core through the coreApi
 // prop - see docs/MFF-Core_module-core-api.md for the contract.
 import React, { useEffect, useState } from 'react';
+import { rememberDraft, restoreDraft, usePageScope } from '../utils/pageState';
 
 const wrapperStyle = { border: '1px solid #ddd', borderRadius: '4px', overflow: 'auto' };
 const tableStyle = { width: '100%', borderCollapse: 'collapse' };
@@ -20,7 +21,9 @@ function PageAccessTab({ coreApi }) {
   const { canManageUsers } = useRoles(userData);
   const [pages, setPages] = useState([]);
   const [roles, setRoles] = useState([]);
+  const scope = usePageScope();
   const [access, setAccess] = useState({});
+  const [serverAccess, setServerAccess] = useState(null); // what is saved
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -28,10 +31,20 @@ function PageAccessTab({ coreApi }) {
 
   useEffect(() => {
     api.get('/alphapulldown/page-access')
-      .then(res => { setPages(res.data.pages); setRoles(res.data.roles); setAccess(res.data.access); })
+      .then(res => {
+        setPages(res.data.pages);
+        setRoles(res.data.roles);
+        setServerAccess(res.data.access);
+        // unticked/ticked boxes the user had not saved yet come back
+        setAccess(restoreDraft(scope, 'page-access:draft', res.data.access) || res.data.access);
+      })
       .catch(err => setError(err.message))
       .finally(() => setLoading(false));
-  }, [api]);
+  }, [api, scope]);
+
+  useEffect(() => {
+    if (serverAccess) rememberDraft(scope, 'page-access:draft', serverAccess, access);
+  }, [serverAccess, access, scope]);
 
   function toggleRole(pageKey, role) {
     if (!canManageUsers) return;
@@ -47,7 +60,7 @@ function PageAccessTab({ coreApi }) {
     setSaving(true);
     setError('');
     api.put('/alphapulldown/page-access', { access })
-      .then(() => setSaved(true))
+      .then(() => { setServerAccess(access); setSaved(true); })
       .catch(err => setError(err.message))
       .finally(() => setSaving(false));
   }

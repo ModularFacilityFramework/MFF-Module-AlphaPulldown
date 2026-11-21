@@ -30,6 +30,7 @@ import LibraryTab from './LibraryTab';
 import SetupTab from './SetupTab';
 import SpeedTab from './SpeedTab';
 import PageAccessTab from './PageAccessTab';
+import { PageStateProvider, readPageState, usePageScope, usePageState } from '../utils/pageState';
 import styles from '../styles/AlphaPulldownTab.module.css';
 import targetStyles from '../styles/TargetTab.module.css';
 
@@ -55,14 +56,18 @@ const TABS = [
   { key: 'setup', label: 'Setup', component: SetupTab }
 ];
 
-function AlphaPulldownTab({ coreApi }) {
-  const { api, useAuth, useRoles } = coreApi;
-  const { userData } = useAuth();
+function AlphaPulldownPages({ coreApi, userData }) {
+  const { api, useRoles } = coreApi;
+  const scope = usePageScope();
   const { canManageUsers, roles: userRoles } = useRoles(userData);
   const [access, setAccess] = useState(null);
-  const [activeTab, setActiveTab] = useState(null);
+  // What the user last had open is remembered per user (see utils/pageState):
+  // the tab, the project and, per project, the target. A remembered item that
+  // no longer exists falls back to the first one below, without an error.
+  const [activeTab, setActiveTab] = usePageState('tab', null);
   const [projects, setProjects] = useState(null);
-  const [projectId, setProjectId] = useState(null);
+  const [projectId, setProjectId] = usePageState('project', null);
+  const [, setChosenTargets] = usePageState('targets', {});
   // The selected project's targets, kept with the project they belong to so
   // switching project never shows the previous project's targets.
   const [targetState, setTargetState] = useState({ projectId: null, list: [], readOnly: false });
@@ -90,7 +95,7 @@ function AlphaPulldownTab({ coreApi }) {
     .catch(err => {
       setLoadError(err.response?.data?.error || err.message);
       setProjects([]);
-    }), [api]);
+    }), [api, setProjectId]);
 
   useEffect(() => { loadProjects(); }, [loadProjects]);
 
@@ -114,10 +119,20 @@ function AlphaPulldownTab({ coreApi }) {
   }, [api, projectId]);
 
   useEffect(() => {
-    setTargetId(null); // not chosen yet: loadTargets picks the first target, or a new one
+    // The target remembered for this project, if any; otherwise not chosen
+    // yet: loadTargets picks the first target, or a new one.
+    const remembered = readPageState(scope, 'targets', {})[projectId];
+    setTargetId(remembered === NEW_TARGET || typeof remembered === 'number' ? remembered : null);
     setTargetState({ projectId: null, list: [], readOnly: false });
     loadTargets();
-  }, [loadTargets]);
+  }, [loadTargets, projectId, scope]);
+
+  // Remember the chosen target (or "new target") for this project.
+  useEffect(() => {
+    if (projectId && targetId !== null && targetState.projectId === projectId) {
+      setChosenTargets(prev => (prev[projectId] === targetId ? prev : { ...prev, [projectId]: targetId }));
+    }
+  }, [projectId, targetId, targetState.projectId, setChosenTargets]);
 
   // Something in the selected project changed (a target was saved or
   // confirmed): refresh the target list and the project list's counts.
@@ -227,6 +242,16 @@ function AlphaPulldownTab({ coreApi }) {
         )}
       </div>
     </div>
+  );
+}
+
+function AlphaPulldownTab({ coreApi }) {
+  const { userData } = coreApi.useAuth();
+  const userId = userData && userData.user ? userData.user.id : null;
+  return (
+    <PageStateProvider userId={userId}>
+      <AlphaPulldownPages coreApi={coreApi} userData={userData} />
+    </PageStateProvider>
   );
 }
 

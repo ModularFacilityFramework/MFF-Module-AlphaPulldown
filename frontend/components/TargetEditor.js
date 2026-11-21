@@ -8,6 +8,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import TargetChain from './TargetChain';
 import TargetGenome from './TargetGenome';
 import TargetModel from './TargetModel';
+import { clearPageState, readPageState, usePageScope, writePageState } from '../utils/pageState';
 import shared from '../styles/SequencesTab.module.css';
 import styles from '../styles/TargetTab.module.css';
 
@@ -78,18 +79,22 @@ function TargetEditor({ coreApi, projectId, targetId, onChanged, onSaved, onBack
   const [acknowledged, setAcknowledged] = useState(false);
   const [libraryMessage, setLibraryMessage] = useState('');
   const mounted = useRef(true);
+  const scope = usePageScope();
+  // Where this target's unsaved edits are remembered (per user, per target).
+  const stateKey = `target:${projectId}:${targetId || 'new'}`;
 
   useEffect(() => () => { mounted.current = false; }, []);
 
   const apply = useCallback((data, created) => {
     const next = draftFrom(data);
+    clearPageState(scope, `${stateKey}:draft`); // saved: nothing unsaved is left to remember
     setPayload(data);
     setDraft(next);
     setSaved(snapshotOf(next));
     setAcknowledged(false);
     if (created && onSaved) onSaved(data.target.id);
     else if (onChanged) onChanged();
-  }, [onChanged, onSaved]);
+  }, [onChanged, onSaved, scope, stateKey]);
 
   useEffect(() => {
     setPayload(null);
@@ -105,14 +110,41 @@ function TargetEditor({ coreApi, projectId, targetId, onChanged, onSaved, onBack
     request
       .then(res => {
         const next = draftFrom(res.data);
+        const baseline = snapshotOf(next);
+        // Unsaved edits the user left behind come back, but only when the
+        // saved target they were made on has not changed since.
+        const kept = res.data.readOnly ? null : readPageState(scope, `${stateKey}:draft`, null);
+        let shown = next;
+        if (kept && kept.base === baseline && Array.isArray(kept.chains) && kept.chains.length > 0) {
+          const restored = {
+            name: String(kept.name || ''),
+            chains: kept.chains.map(c => ({ ...c, key: newKey() })),
+            genome: kept.genome || null
+          };
+          if (snapshotOf(restored) !== baseline) shown = restored;
+        }
         setPayload(res.data);
-        setDraft(next);
-        setSaved(snapshotOf(next));
+        setDraft(shown);
+        setSaved(baseline);
       })
       .catch(err => setError(err.response?.data?.error || err.message));
-  }, [api, projectId, targetId]);
+  }, [api, projectId, targetId, scope, stateKey]);
 
-  if (error && !payload) return <p className={shared.errorText}>{error}</p>;
+  // Remember unsaved edits as they are made; forget them once saved or reverted.
+  useEffect(() => {
+    if (!payload || !draft || payload.readOnly) return;
+    if (snapshotOf(draft) === saved) clearPageState(scope, `${stateKey}:draft`);
+    else writePageState(scope, `${stateKey}:draft`, { base: saved, name: draft.name, chains: draft.chains, genome: draft.genome });
+  }, [payload, draft, saved, scope, stateKey]);
+
+  if (error && !payload) {
+    return (
+      <div>
+        <p className={shared.errorText}>{error}</p>
+        {onBack && <button type="button" className={shared.btnGray} onClick={onBack}>Back</button>}
+      </div>
+    );
+  }
   if (!payload || !draft) return <div className={shared.empty}>Loading...</div>;
 
   const readOnly = payload.readOnly;
@@ -221,6 +253,7 @@ function TargetEditor({ coreApi, projectId, targetId, onChanged, onSaved, onBack
         </p>
         <TargetGenome
           api={api}
+          stateKey={stateKey}
           genome={draft.genome}
           chains={draft.chains}
           readOnly={readOnly}
@@ -253,6 +286,7 @@ function TargetEditor({ coreApi, projectId, targetId, onChanged, onSaved, onBack
         </p>
         <TargetModel
           api={api}
+          stateKey={stateKey}
           targetId={target ? target.id : null}
           canChange={!!target && !dirty}
           model={target ? target.model : null}

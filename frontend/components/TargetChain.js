@@ -20,7 +20,9 @@ function cleanedLength(text) {
 function TargetChain({ api, chain, index, count, readOnly, onChange, onRemove }) {
   const [lookupBusy, setLookupBusy] = useState(false);
   const [lookupError, setLookupError] = useState('');
-  const [query, setQuery] = useState('');
+  // The search text is part of the chain's draft, so it is remembered with it.
+  const query = chain.searchText || '';
+  const setQuery = text => onChange({ searchText: text });
   const [results, setResults] = useState(null);
   const [searching, setSearching] = useState(false);
 

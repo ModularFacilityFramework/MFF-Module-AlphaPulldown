@@ -5,6 +5,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { formatDuration } from './formatDuration';
 import { errorText } from './runUi';
+import { usePageState } from '../utils/pageState';
 import styles from '../styles/SpeedTab.module.css';
 
 const STAGE_TITLES = { msa: 'MSA search (CPU)', fold: 'Co-folding (GPU)' };
@@ -152,7 +153,7 @@ function GroupRow({ group, open, onToggle }) {
 }
 
 function StageTable({ stage, groups }) {
-  const [openKey, setOpenKey] = useState(null);
+  const [openKey, setOpenKey] = usePageState(`speed:open:${stage}`, null); // the expanded row, remembered
   const keyOf = g => `${g.method}|${g.hardware}`;
   return (
     <div className={styles.panel}>
