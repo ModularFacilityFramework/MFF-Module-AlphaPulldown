@@ -8,7 +8,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import TargetChain from './TargetChain';
 import TargetGenome from './TargetGenome';
 import TargetModel from './TargetModel';
-import { clearPageState, readPageState, usePageScope, writePageState } from '../utils/pageState';
+import { usePageDraft } from '../utils/pageState';
 import shared from '../styles/SequencesTab.module.css';
 import styles from '../styles/TargetTab.module.css';
 
@@ -79,22 +79,22 @@ function TargetEditor({ coreApi, projectId, targetId, onChanged, onSaved, onBack
   const [acknowledged, setAcknowledged] = useState(false);
   const [libraryMessage, setLibraryMessage] = useState('');
   const mounted = useRef(true);
-  const scope = usePageScope();
   // Where this target's unsaved edits are remembered (per user, per target).
   const stateKey = `target:${projectId}:${targetId || 'new'}`;
+  const memory = usePageDraft(`${stateKey}:draft`);
 
   useEffect(() => () => { mounted.current = false; }, []);
 
   const apply = useCallback((data, created) => {
     const next = draftFrom(data);
-    clearPageState(scope, `${stateKey}:draft`); // saved: nothing unsaved is left to remember
+    memory.forget(); // saved: nothing unsaved is left to remember
     setPayload(data);
     setDraft(next);
     setSaved(snapshotOf(next));
     setAcknowledged(false);
     if (created && onSaved) onSaved(data.target.id);
     else if (onChanged) onChanged();
-  }, [onChanged, onSaved, scope, stateKey]);
+  }, [onChanged, onSaved, memory]);
 
   useEffect(() => {
     setPayload(null);
@@ -113,9 +113,9 @@ function TargetEditor({ coreApi, projectId, targetId, onChanged, onSaved, onBack
         const baseline = snapshotOf(next);
         // Unsaved edits the user left behind come back, but only when the
         // saved target they were made on has not changed since.
-        const kept = res.data.readOnly ? null : readPageState(scope, `${stateKey}:draft`, null);
+        const kept = res.data.readOnly ? null : memory.restore(baseline);
         let shown = next;
-        if (kept && kept.base === baseline && Array.isArray(kept.chains) && kept.chains.length > 0) {
+        if (kept && Array.isArray(kept.chains) && kept.chains.length > 0) {
           const restored = {
             name: String(kept.name || ''),
             chains: kept.chains.map(c => ({ ...c, key: newKey() })),
@@ -128,14 +128,13 @@ function TargetEditor({ coreApi, projectId, targetId, onChanged, onSaved, onBack
         setSaved(baseline);
       })
       .catch(err => setError(err.response?.data?.error || err.message));
-  }, [api, projectId, targetId, scope, stateKey]);
+  }, [api, projectId, targetId, memory]);
 
   // Remember unsaved edits as they are made; forget them once saved or reverted.
   useEffect(() => {
     if (!payload || !draft || payload.readOnly) return;
-    if (snapshotOf(draft) === saved) clearPageState(scope, `${stateKey}:draft`);
-    else writePageState(scope, `${stateKey}:draft`, { base: saved, name: draft.name, chains: draft.chains, genome: draft.genome });
-  }, [payload, draft, saved, scope, stateKey]);
+    memory.remember(saved, { name: draft.name, chains: draft.chains, genome: draft.genome }, snapshotOf(draft) === saved);
+  }, [payload, draft, saved, memory]);
 
   if (error && !payload) {
     return (

@@ -20,7 +20,7 @@
 // backend/routes/pageAccessRoutes.js): staff (canManageUsers) always see
 // every tab plus the staff-only Speed statistics and Page Access tabs; everyone else only
 // sees tabs a role of theirs has been granted.
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import ProjectBar from './ProjectBar';
 import TargetBar, { NEW_TARGET } from './TargetBar';
 import TargetTab from './TargetTab';
@@ -30,7 +30,7 @@ import LibraryTab from './LibraryTab';
 import SetupTab from './SetupTab';
 import SpeedTab from './SpeedTab';
 import PageAccessTab from './PageAccessTab';
-import { PageStateProvider, readPageState, usePageScope, usePageState } from '../utils/pageState';
+import { PageStateProvider, usePageState } from '../utils/pageState';
 import styles from '../styles/AlphaPulldownTab.module.css';
 import targetStyles from '../styles/TargetTab.module.css';
 
@@ -58,7 +58,6 @@ const TABS = [
 
 function AlphaPulldownPages({ coreApi, userData }) {
   const { api, useRoles } = coreApi;
-  const scope = usePageScope();
   const { canManageUsers, roles: userRoles } = useRoles(userData);
   const [access, setAccess] = useState(null);
   // What the user last had open is remembered per user (see utils/pageState):
@@ -67,7 +66,9 @@ function AlphaPulldownPages({ coreApi, userData }) {
   const [activeTab, setActiveTab] = usePageState('tab', null);
   const [projects, setProjects] = useState(null);
   const [projectId, setProjectId] = usePageState('project', null);
-  const [, setChosenTargets] = usePageState('targets', {});
+  const [chosenTargets, setChosenTargets] = usePageState('targets', {});
+  const chosenRef = useRef(chosenTargets);
+  chosenRef.current = chosenTargets;
   // The selected project's targets, kept with the project they belong to so
   // switching project never shows the previous project's targets.
   const [targetState, setTargetState] = useState({ projectId: null, list: [], readOnly: false });
@@ -121,11 +122,11 @@ function AlphaPulldownPages({ coreApi, userData }) {
   useEffect(() => {
     // The target remembered for this project, if any; otherwise not chosen
     // yet: loadTargets picks the first target, or a new one.
-    const remembered = readPageState(scope, 'targets', {})[projectId];
+    const remembered = chosenRef.current[projectId];
     setTargetId(remembered === NEW_TARGET || typeof remembered === 'number' ? remembered : null);
     setTargetState({ projectId: null, list: [], readOnly: false });
     loadTargets();
-  }, [loadTargets, projectId, scope]);
+  }, [loadTargets, projectId]);
 
   // Remember the chosen target (or "new target") for this project.
   useEffect(() => {
@@ -249,7 +250,7 @@ function AlphaPulldownTab({ coreApi }) {
   const { userData } = coreApi.useAuth();
   const userId = userData && userData.user ? userData.user.id : null;
   return (
-    <PageStateProvider userId={userId}>
+    <PageStateProvider coreApi={coreApi} userId={userId}>
       <AlphaPulldownPages coreApi={coreApi} userData={userData} />
     </PageStateProvider>
   );

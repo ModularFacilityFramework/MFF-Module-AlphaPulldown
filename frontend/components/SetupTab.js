@@ -3,7 +3,7 @@
 // touches core through the coreApi prop - see docs/MFF-Core_module-core-api.md
 // for the contract.
 import React, { useCallback, useEffect, useState } from 'react';
-import { rememberDraft, restoreDraft, usePageScope } from '../utils/pageState';
+import { usePageDraft } from '../utils/pageState';
 import styles from '../styles/SetupTab.module.css';
 
 // type 'number' values are sent as numbers; the backend validates every
@@ -56,7 +56,7 @@ function renderField(field, form, updateField) {
 function SetupTab({ coreApi }) {
   const { api, useAuth, useRoles } = coreApi;
   const { canManageUsers } = useRoles(useAuth().userData);
-  const scope = usePageScope();
+  const memory = usePageDraft('setup:form');
   const [form, setForm] = useState(null);
   const [serverForm, setServerForm] = useState(null); // what the server holds
   const [loading, setLoading] = useState(true);
@@ -69,15 +69,15 @@ function SetupTab({ coreApi }) {
       .then(res => {
         setServerForm(res.data);
         // unsaved edits from before the user left come back
-        setForm(restoreDraft(scope, 'setup:form', res.data) || res.data);
+        setForm(memory.restore(res.data) || res.data);
       })
       .catch(err => setError(err.response?.data?.error || err.message))
       .finally(() => setLoading(false));
-  }, [api, scope]);
+  }, [api, memory]);
 
   useEffect(() => {
-    if (form && serverForm) rememberDraft(scope, 'setup:form', serverForm, form);
-  }, [form, serverForm, scope]);
+    if (form && serverForm) memory.remember(serverForm, form);
+  }, [form, serverForm, memory]);
 
   function updateField(key, value) {
     setForm(f => ({ ...f, [key]: value }));
@@ -186,7 +186,7 @@ function SetupTab({ coreApi }) {
 
 // Staff only: where the one shared library lives and the feature set tag.
 function LibrarySettings({ api }) {
-  const scope = usePageScope();
+  const memory = usePageDraft('setup:library');
   const [config, setConfig] = useState(null);
   const [libraryDir, setLibraryDir] = useState('');
   const [tag, setTag] = useState('v1');
@@ -198,19 +198,19 @@ function LibrarySettings({ api }) {
   const load = useCallback(() => api.get('/alphapulldown/library')
     .then(res => {
       const base = { libraryDir: res.data.libraryDir || '', tag: res.data.featureSetTag || 'v1' };
-      const kept = restoreDraft(scope, 'setup:library', base) || base; // unsaved edits come back
+      const kept = memory.restore(base) || base; // unsaved edits come back
       setConfig(res.data);
       setBase(base);
       setLibraryDir(kept.libraryDir);
       setTag(kept.tag);
     })
-    .catch(err => setError(err.response?.data?.error || err.message)), [api, scope]);
+    .catch(err => setError(err.response?.data?.error || err.message)), [api, memory]);
 
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
-    if (base) rememberDraft(scope, 'setup:library', base, { libraryDir, tag });
-  }, [base, libraryDir, tag, scope]);
+    if (base) memory.remember(base, { libraryDir, tag });
+  }, [base, libraryDir, tag, memory]);
 
   function save(e) {
     e.preventDefault();

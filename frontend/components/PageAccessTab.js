@@ -2,7 +2,7 @@
 // this module's other tabs. Only ever touches core through the coreApi
 // prop - see docs/MFF-Core_module-core-api.md for the contract.
 import React, { useEffect, useState } from 'react';
-import { rememberDraft, restoreDraft, usePageScope } from '../utils/pageState';
+import { usePageDraft } from '../utils/pageState';
 
 const wrapperStyle = { border: '1px solid #ddd', borderRadius: '4px', overflow: 'auto' };
 const tableStyle = { width: '100%', borderCollapse: 'collapse' };
@@ -21,7 +21,7 @@ function PageAccessTab({ coreApi }) {
   const { canManageUsers } = useRoles(userData);
   const [pages, setPages] = useState([]);
   const [roles, setRoles] = useState([]);
-  const scope = usePageScope();
+  const memory = usePageDraft('page-access:draft');
   const [access, setAccess] = useState({});
   const [serverAccess, setServerAccess] = useState(null); // what is saved
   const [loading, setLoading] = useState(true);
@@ -36,15 +36,15 @@ function PageAccessTab({ coreApi }) {
         setRoles(res.data.roles);
         setServerAccess(res.data.access);
         // unticked/ticked boxes the user had not saved yet come back
-        setAccess(restoreDraft(scope, 'page-access:draft', res.data.access) || res.data.access);
+        setAccess(memory.restore(res.data.access) || res.data.access);
       })
       .catch(err => setError(err.message))
       .finally(() => setLoading(false));
-  }, [api, scope]);
+  }, [api, memory]);
 
   useEffect(() => {
-    if (serverAccess) rememberDraft(scope, 'page-access:draft', serverAccess, access);
-  }, [serverAccess, access, scope]);
+    if (serverAccess) memory.remember(serverAccess, access);
+  }, [serverAccess, access, memory]);
 
   function toggleRole(pageKey, role) {
     if (!canManageUsers) return;
