@@ -141,3 +141,17 @@ test('the background start retries until nothing is left, then stops', async () 
   await timers.shift().fn();
   assert.strictEqual(timers.length, 0);
 });
+
+test('what can never be moved is not retried for ever', async () => {
+  const core = fakeCore(sample(), { disabled: [9] });
+  const timers = [];
+  const lines = [];
+  move.start(core, { log: { log: () => {}, warn: l => lines.push(l) }, schedule: (fn, delay) => { timers.push({ fn, delay }); return null; } });
+  let runs = 0;
+  while (timers.length > 0 && runs < 50) {
+    runs += 1;
+    await timers.shift().fn();
+  }
+  assert.strictEqual(runs, 9); // the first try and 8 retries
+  assert.match(lines[lines.length - 1], /until the module next starts/);
+});

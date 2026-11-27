@@ -14,6 +14,10 @@ const cofold = require('./cofoldPlan');
 
 const FIRST_DELAY_MS = 20 * 1000;
 const RETRY_DELAYS_MS = [60 * 1000, 5 * 60 * 1000, 30 * 60 * 1000];
+// About three and a half hours of trying. Every call as another user is audited
+// by core, so something that cannot be moved must not be asked about for ever;
+// the next start of the module tries again.
+const MAX_RETRIES = 8;
 const TEMPLATE_BATCH = 200;
 // Answers that will not change by asking again.
 const PERMANENT = [400, 409];
@@ -140,7 +144,7 @@ async function moveOnce(coreApi) {
 
 // Starts the move in the background (the server may not be listening yet while
 // modules register) and tries again, less and less often, until nothing is
-// left.
+// left or MAX_RETRIES is reached.
 function start(coreApi, { log = console, schedule = setTimeout } = {}) {
   if (typeof coreApi.callModuleAsUser !== 'function') {
     log.warn('[alphapulldown] old projects cannot be moved to Science: this core has no callModuleAsUser.');
@@ -165,6 +169,10 @@ function start(coreApi, { log = console, schedule = setTimeout } = {}) {
     // The same reasons are not logged over and over.
     if (pending !== lastPending) log.warn(`[alphapulldown] still to be moved to Science: ${pending}`);
     lastPending = pending;
+    if (attempt >= MAX_RETRIES) {
+      log.warn('[alphapulldown] the move to Science stops trying until the module next starts.');
+      return;
+    }
     later(RETRY_DELAYS_MS[Math.min(attempt, RETRY_DELAYS_MS.length - 1)]);
     attempt += 1;
   }
