@@ -19,6 +19,11 @@ export function PageStateProvider({ coreApi, userId, children }) {
   return <PageContext.Provider value={value}>{children}</PageContext.Provider>;
 }
 
+// What core gave the module (null outside the provider).
+export function useCoreApi() {
+  return useContext(PageContext).core;
+}
+
 function fallbackKey(scope, key) {
   return `mff:alphapulldown:${scope}:${key}`;
 }

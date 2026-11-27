@@ -6,6 +6,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { formatDuration } from './formatDuration';
 import { errorText } from './runUi';
 import { usePageState } from '../utils/pageState';
+import { SortHeader, useSortedRows } from '../utils/sortableTable';
 import styles from '../styles/SpeedTab.module.css';
 
 const STAGE_TITLES = { msa: 'MSA search (CPU)', fold: 'Co-folding (GPU)' };
@@ -84,21 +85,24 @@ function Activity({ activity }) {
   );
 }
 
-function Bands({ bands }) {
+const LEVEL_RANK = { none: 0, low: 1, good: 2 };
+
+function Bands({ bands, stage }) {
+  const table = useSortedRows(bands, {
+    size: b => b.label,
+    samples: { value: b => b.samples, type: 'number' },
+    finished: { value: b => b.finished, type: 'number' },
+    quick: { value: b => (b.run ? b.run.p25 : null), type: 'number' },
+    median: { value: b => (b.run ? b.run.p50 : null), type: 'number' },
+    slow: { value: b => (b.run ? b.run.p90 : null), type: 'number' }
+  }, { rememberAs: `alphapulldown.speed.${stage}-bands` });
   return (
     <table className={styles.bandTable}>
       <thead>
-        <tr>
-          <th>Size (aa)</th>
-          <th className={styles.numeric}>Samples</th>
-          <th className={styles.numeric}>Finished</th>
-          <th className={styles.numeric}>Quickest quarter</th>
-          <th className={styles.numeric}>Median</th>
-          <th className={styles.numeric}>Slowest tenth</th>
-        </tr>
+        <tr><SortHeader table={table} column="size">Size (aa)</SortHeader><SortHeader table={table} column="samples" className={styles.numeric}>Samples</SortHeader><SortHeader table={table} column="finished" className={styles.numeric}>Finished</SortHeader><SortHeader table={table} column="quick" className={styles.numeric}>Quickest quarter</SortHeader><SortHeader table={table} column="median" className={styles.numeric}>Median</SortHeader><SortHeader table={table} column="slow" className={styles.numeric}>Slowest tenth</SortHeader></tr>
       </thead>
       <tbody>
-        {bands.map(b => (
+        {table.rows.map(b => (
           <tr key={b.label}>
             <td>{b.label}</td>
             <td className={styles.numeric}>{fmt(b.samples)}</td>
@@ -113,7 +117,7 @@ function Bands({ bands }) {
   );
 }
 
-function GroupRow({ group, open, onToggle }) {
+function GroupRow({ group, stage, open, onToggle }) {
   const level = LEVEL_TEXT[group.level];
   const notFinished = group.oom + group.timeout + group.failed;
   return (
@@ -141,7 +145,7 @@ function GroupRow({ group, open, onToggle }) {
         <tr>
           <td />
           <td colSpan={10} className={styles.bandCell}>
-            <Bands bands={group.bands} />
+            <Bands bands={group.bands} stage={stage} />
             <p className={styles.muted}>
               Times are for finished jobs only. Queue time is the median wait before a job started (blank for MSA runs, which are timed per protein).
             </p>
@@ -155,6 +159,18 @@ function GroupRow({ group, open, onToggle }) {
 function StageTable({ stage, groups }) {
   const [openKey, setOpenKey] = usePageState(`speed:open:${stage}`, null); // the expanded row, remembered
   const keyOf = g => `${g.method}|${g.hardware}`;
+  const table = useSortedRows(groups, {
+    what: g => g.methodText,
+    where: g => g.hardwareText,
+    samples: { value: g => g.samples, type: 'number' },
+    finished: { value: g => g.finished, type: 'number' },
+    notFinished: { value: g => g.oom + g.timeout + g.failed, type: 'number' },
+    confidence: { value: g => LEVEL_RANK[g.level], type: 'number' },
+    typical: { value: g => (g.run ? g.run.p50 : null), type: 'number' },
+    slow: { value: g => (g.run ? g.run.p90 : null), type: 'number' },
+    queue: { value: g => (g.queue ? g.queue.p50 : null), type: 'number' },
+    sizes: { value: g => g.minLength, type: 'number' }
+  }, { rememberAs: `alphapulldown.speed.${stage}` });
   return (
     <div className={styles.panel}>
       <h4 className={styles.panelTitle}>{STAGE_TITLES[stage]}</h4>
@@ -166,22 +182,14 @@ function StageTable({ stage, groups }) {
             <thead>
               <tr>
                 <th />
-                <th>What was run</th>
-                <th>Where</th>
-                <th className={styles.numeric}>Samples</th>
-                <th className={styles.numeric}>Finished</th>
-                <th className={styles.numeric}>Did not</th>
-                <th>Confidence</th>
-                <th className={styles.numeric}>Typical</th>
-                <th className={styles.numeric}>Slow</th>
-                <th className={styles.numeric}>Queue</th>
-                <th className={styles.numeric}>Sizes (aa)</th>
+                <SortHeader table={table} column="what">What was run</SortHeader><SortHeader table={table} column="where">Where</SortHeader><SortHeader table={table} column="samples" className={styles.numeric}>Samples</SortHeader><SortHeader table={table} column="finished" className={styles.numeric}>Finished</SortHeader><SortHeader table={table} column="notFinished" className={styles.numeric}>Did not</SortHeader><SortHeader table={table} column="confidence">Confidence</SortHeader><SortHeader table={table} column="typical" className={styles.numeric}>Typical</SortHeader><SortHeader table={table} column="slow" className={styles.numeric}>Slow</SortHeader><SortHeader table={table} column="queue" className={styles.numeric}>Queue</SortHeader><SortHeader table={table} column="sizes" className={styles.numeric}>Sizes (aa)</SortHeader>
               </tr>
             </thead>
             <tbody>
-              {groups.map(g => (
+              {table.rows.map(g => (
                 <GroupRow
                   key={keyOf(g)}
+                  stage={stage}
                   group={g}
                   open={openKey === keyOf(g)}
                   onToggle={() => setOpenKey(openKey === keyOf(g) ? null : keyOf(g))}

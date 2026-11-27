@@ -9,6 +9,7 @@ import MethodsPanel from './MethodsPanel';
 import ProvenanceView from './ProvenanceView';
 import { formatDuration } from './formatDuration';
 import { errorText, badgeClass as badgeClassFor, formatWhen } from './runUi';
+import { SortHeader, useSortedRows } from '../utils/sortableTable';
 import styles from '../styles/MsaTab.module.css';
 
 const POLL_MS = 10000;
@@ -148,6 +149,12 @@ function RunDetail({ api, projectId, run }) {
   }, [loadLog, run.active]);
 
   const failed = detail ? detail.failed : [];
+  const failedTable = useSortedRows(failed, {
+    protein: f => f.name,
+    length: { value: f => f.length, type: 'number' },
+    result: f => (f.status === 'oom' ? 'Out of memory (killed)' : `Failed (exit ${f.exit})`),
+    seconds: { value: f => f.seconds, type: 'number' }
+  }, { rememberAs: 'alphapulldown.msa.failed' });
   return (
     <div className={styles.detail}>
       {error && <p className={styles.errorText}>{error}</p>}
@@ -156,9 +163,9 @@ function RunDetail({ api, projectId, run }) {
         <>
           <h4 className={styles.panelTitle}>Proteins that failed</h4>
           <table className={styles.table}>
-            <thead><tr><th>Protein</th><th className={styles.numeric}>Length</th><th>Result</th><th className={styles.numeric}>Seconds</th><th /></tr></thead>
+            <thead><tr><SortHeader table={failedTable} column="protein">Protein</SortHeader><SortHeader table={failedTable} column="length" className={styles.numeric}>Length</SortHeader><SortHeader table={failedTable} column="result">Result</SortHeader><SortHeader table={failedTable} column="seconds" className={styles.numeric}>Seconds</SortHeader><th /></tr></thead>
             <tbody>
-              {failed.map(f => (
+              {failedTable.rows.map(f => (
                 <tr key={f.index}>
                   <td className={styles.mono}>{f.name}</td>
                   <td className={styles.numeric}>{`${f.length.toLocaleString()} aa`}</td>

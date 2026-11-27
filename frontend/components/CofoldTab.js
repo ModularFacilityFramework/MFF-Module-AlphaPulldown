@@ -9,6 +9,7 @@ import MethodsPanel from './MethodsPanel';
 import ProvenanceView from './ProvenanceView';
 import { formatDuration } from './formatDuration';
 import { errorText, badgeClass as badgeClassFor, formatWhen } from './runUi';
+import { SortHeader, useSortedRows } from '../utils/sortableTable';
 import styles from '../styles/MsaTab.module.css';
 import own from '../styles/CofoldTab.module.css';
 
@@ -88,6 +89,11 @@ function EstimateLine({ plan }) {
 }
 
 function PlanPanel({ plan, options, onOptions, onStart, starting }) {
+  const preview = useSortedRows(plan ? plan.preview : [], {
+    bait: p => p.bait,
+    candidate: p => p.cand,
+    aa: { value: p => p.lenA + (p.lenB || 0), type: 'number' }
+  }, { rememberAs: 'alphapulldown.cofold.preview' });
   if (!plan) return <div className={styles.panel}>Loading...</div>;
   const set = patch => onOptions({ ...options, ...patch });
   const blocked = plan.problems.length > 0 || plan.toRun === 0 || plan.busy;
@@ -170,9 +176,9 @@ function PlanPanel({ plan, options, onOptions, onStart, starting }) {
 
       {plan.preview.length > 0 && (
         <table className={styles.table}>
-          <thead><tr><th>{plan.mode === 'homo_oligomer' ? 'Protein' : 'Bait'}</th><th>Candidate</th><th className={styles.numeric}>Amino acids</th></tr></thead>
+          <thead><tr><SortHeader table={preview} column="bait">{plan.mode === 'homo_oligomer' ? 'Protein' : 'Bait'}</SortHeader><SortHeader table={preview} column="candidate">Candidate</SortHeader><SortHeader table={preview} column="aa" className={styles.numeric}>Amino acids</SortHeader></tr></thead>
           <tbody>
-            {plan.preview.map(p => (
+            {preview.rows.map(p => (
               <tr key={`${p.bait}/${p.cand}`}>
                 <td className={styles.mono}>{p.bait}</td>
                 <td className={styles.mono}>{p.cand || '—'}</td>
@@ -252,6 +258,16 @@ function RunDetail({ api, projectId, run }) {
 
   useEffect(() => { setOffset(0); }, [group]);
 
+  // The pairs come a page at a time: sorting orders the page shown.
+  const table = useSortedRows(page ? page.items : [], {
+    bait: item => item.bait,
+    candidate: item => item.cand,
+    aa: { value: item => item.lenA + (item.lenB || 0), type: 'number' },
+    state: item => item.state,
+    runTime: { value: item => pairSeconds(item), type: 'number' },
+    job: item => item.abcfoldJobId
+  }, { rememberAs: 'alphapulldown.cofold.pairs' });
+
   const c = run.counts;
   useEffect(() => {
     api.get(`/alphapulldown/projects/${projectId}/cofold/runs/${run.id}/items`, { params: { group, offset, limit: PAGE } })
@@ -279,10 +295,10 @@ function RunDetail({ api, projectId, run }) {
       {page && page.items.length > 0 && (
         <table className={styles.table}>
           <thead>
-            <tr><th>Bait</th><th>Candidate</th><th className={styles.numeric}>Amino acids</th><th>State</th><th className={styles.numeric}>Run time</th><th>ABCFold job</th><th /></tr>
+            <tr><SortHeader table={table} column="bait">Bait</SortHeader><SortHeader table={table} column="candidate">Candidate</SortHeader><SortHeader table={table} column="aa" className={styles.numeric}>Amino acids</SortHeader><SortHeader table={table} column="state">State</SortHeader><SortHeader table={table} column="runTime" className={styles.numeric}>Run time</SortHeader><SortHeader table={table} column="job">ABCFold job</SortHeader><th /></tr>
           </thead>
           <tbody>
-            {page.items.map(item => {
+            {table.rows.map(item => {
               const seconds = pairSeconds(item);
               return (
                 <tr key={item.id}>

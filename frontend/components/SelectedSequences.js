@@ -2,6 +2,7 @@
 // copy number, remove one or a whole list. Reloads when refreshKey changes
 // (something was added elsewhere on this tab).
 import React, { useCallback, useEffect, useState } from 'react';
+import { SortHeader, useSortedRows } from '../utils/sortableTable';
 import styles from '../styles/SequencesTab.module.css';
 
 const PAGE_SIZE = 50;
@@ -62,6 +63,14 @@ function SelectedSequences({ api, project, roles, refreshKey, onChanged }) {
 
   const pages = Math.max(1, Math.ceil(data.total / PAGE_SIZE));
   const roleLabel = key => (roles.find(r => r.key === key) || { label: key }).label;
+  // The list comes a page at a time: sorting orders the page shown.
+  const table = useSortedRows(data.items, {
+    name: item => item.name,
+    description: item => item.description,
+    list: item => roleLabel(item.role),
+    length: { value: item => item.length, type: 'number' },
+    copies: { value: item => item.copies, type: 'number' }
+  }, { rememberAs: 'alphapulldown.sequences.selected' });
   const clearLabel = roleFilter ? `all ${roleLabel(roleFilter).toLowerCase()}s` : 'everything';
 
   return (
@@ -101,10 +110,10 @@ function SelectedSequences({ api, project, roles, refreshKey, onChanged }) {
           <div className={styles.tableWrapper}>
             <table className={styles.table}>
               <thead>
-                <tr><th>Name</th><th>Description</th><th>List</th><th className={styles.numeric}>Length</th><th>Copies</th><th /></tr>
+                <tr><SortHeader table={table} column="name">Name</SortHeader><SortHeader table={table} column="description">Description</SortHeader><SortHeader table={table} column="list">List</SortHeader><SortHeader table={table} column="length" className={styles.numeric}>Length</SortHeader><SortHeader table={table} column="copies">Copies</SortHeader><th /></tr>
               </thead>
               <tbody>
-                {data.items.map(item => (
+                {table.rows.map(item => (
                   <tr key={item.id}>
                     <td className={styles.mono}>{item.name}</td>
                     <td>{item.description}</td>

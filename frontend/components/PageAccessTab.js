@@ -3,6 +3,7 @@
 // prop - see docs/MFF-Core_module-core-api.md for the contract.
 import React, { useEffect, useState } from 'react';
 import { usePageDraft } from '../utils/pageState';
+import { SortHeader, useSortedRows } from '../utils/sortableTable';
 
 const wrapperStyle = { border: '1px solid #ddd', borderRadius: '4px', overflow: 'auto' };
 const tableStyle = { width: '100%', borderCollapse: 'collapse' };
@@ -65,6 +66,12 @@ function PageAccessTab({ coreApi }) {
       .finally(() => setSaving(false));
   }
 
+  // One column per role, sorted by whether the box is ticked.
+  const table = useSortedRows(pages, {
+    page: p => p.label,
+    ...Object.fromEntries(roles.map(role => [`role:${role}`, { value: p => ((access[p.key] || []).includes(role) ? 1 : 0), type: 'number' }]))
+  }, { rememberAs: 'alphapulldown.page-access.pages' });
+
   if (loading) return <div style={loadingStyle}>Loading...</div>;
   if (error) return <div style={errorStyle}>{error}</div>;
 
@@ -73,9 +80,9 @@ function PageAccessTab({ coreApi }) {
       {!canManageUsers && <p style={hintStyle}>Read-only - only staff-level users in this module can change page access.</p>}
       <div style={wrapperStyle}>
         <table style={tableStyle}>
-          <thead style={theadStyle}><tr><th style={thStyle}>Page</th>{roles.map(role => <th key={role} style={thStyle}>{role}</th>)}</tr></thead>
+          <thead style={theadStyle}><tr><SortHeader table={table} column="page" style={thStyle}>Page</SortHeader>{roles.map(role => <SortHeader key={role} table={table} column={`role:${role}`} label={role} style={thStyle}>{role}</SortHeader>)}</tr></thead>
           <tbody>
-            {pages.map(page => (
+            {table.rows.map(page => (
               <tr key={page.key}>
                 <td style={tdStyle}>{page.label}</td>
                 {roles.map(role => (

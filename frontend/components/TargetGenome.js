@@ -5,6 +5,7 @@
 // user chooses.
 import React, { useState } from 'react';
 import { usePageState } from '../utils/pageState';
+import { SortHeader, useSortedRows } from '../utils/sortableTable';
 import shared from '../styles/SequencesTab.module.css';
 import styles from '../styles/TargetTab.module.css';
 
@@ -19,6 +20,14 @@ function TargetGenome({ api, stateKey, genome, chains, readOnly, needsLibrary, o
   const [via, setVia] = useState('search');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+
+  const found = useSortedRows(results ? results.items : [], {
+    upid: item => item.upid,
+    organism: item => item.organism,
+    taxon: { value: item => item.taxId, type: 'number' },
+    proteins: { value: item => item.proteinCount, type: 'number' },
+    library: item => describeLibrary(item.inLibrary)
+  }, { rememberAs: 'alphapulldown.target.genome-search' });
 
   function find(query, source, label) {
     setBusy(true);
@@ -82,9 +91,9 @@ function TargetGenome({ api, stateKey, genome, chains, readOnly, needsLibrary, o
               <p className={shared.muted}>{results.label}</p>
               {results.items.length === 0 ? <p className={shared.empty}>No proteome found.</p> : (
                 <table className={shared.table}>
-                  <thead><tr><th /><th>Proteome</th><th>Organism</th><th>Taxon</th><th className={shared.numeric}>Proteins</th><th>Shared library</th></tr></thead>
+                  <thead><tr><th /><SortHeader table={found} column="upid">Proteome</SortHeader><SortHeader table={found} column="organism">Organism</SortHeader><SortHeader table={found} column="taxon">Taxon</SortHeader><SortHeader table={found} column="proteins" className={shared.numeric}>Proteins</SortHeader><SortHeader table={found} column="library">Shared library</SortHeader></tr></thead>
                   <tbody>
-                    {results.items.map(item => (
+                    {found.rows.map(item => (
                       <tr key={item.upid}>
                         <td><button type="button" className={shared.btnGreen} onClick={() => choose(item)}>Use</button></td>
                         <td className={shared.mono}>{item.upid}</td>

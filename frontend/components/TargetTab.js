@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import TargetEditor from './TargetEditor';
 import { usePageState } from '../utils/pageState';
+import { SortHeader, useSortedRows } from '../utils/sortableTable';
 import shared from '../styles/SequencesTab.module.css';
 
 function when(value) {
@@ -19,6 +20,17 @@ function StaffOverview({ api, onOpen }) {
       .catch(err => setError(err.response?.data?.error || err.message));
   }, [api]);
 
+  const table = useSortedRows(targets || [], {
+    owner: t => t.ownerName || t.ownerId,
+    project: t => `P${t.projectNumber} - ${t.projectName}`,
+    name: t => t.name,
+    status: t => t.status,
+    genome: t => t.genome,
+    chains: { value: t => t.chains, type: 'number' },
+    unconfirmed: { value: t => t.unconfirmedChains, type: 'number' },
+    updated: { value: t => t.updatedAt, type: 'date' }
+  }, { rememberAs: 'alphapulldown.target.all-users' });
+
   if (error) return <p className={shared.errorText}>{error}</p>;
   if (!targets) return null;
   return (
@@ -27,9 +39,9 @@ function StaffOverview({ api, onOpen }) {
       {targets.length === 0 ? <p className={shared.empty}>No target has been saved yet.</p> : (
         <div className={shared.tableWrapper}>
           <table className={shared.table}>
-            <thead><tr><th /><th>Owner</th><th>Project</th><th>Target</th><th>Status</th><th>Genome</th><th className={shared.numeric}>Chains</th><th className={shared.numeric}>Not confirmed</th><th>Updated</th></tr></thead>
+            <thead><tr><th /><SortHeader table={table} column="owner">Owner</SortHeader><SortHeader table={table} column="project">Project</SortHeader><SortHeader table={table} column="name">Target</SortHeader><SortHeader table={table} column="status">Status</SortHeader><SortHeader table={table} column="genome">Genome</SortHeader><SortHeader table={table} column="chains" className={shared.numeric}>Chains</SortHeader><SortHeader table={table} column="unconfirmed" className={shared.numeric}>Not confirmed</SortHeader><SortHeader table={table} column="updated">Updated</SortHeader></tr></thead>
             <tbody>
-              {targets.map(t => (
+              {table.rows.map(t => (
                 <tr key={t.targetId}>
                   <td><button type="button" className={shared.btnBlue} onClick={() => onOpen(t)}>View</button></td>
                   <td>{t.ownerName || t.ownerId}</td>

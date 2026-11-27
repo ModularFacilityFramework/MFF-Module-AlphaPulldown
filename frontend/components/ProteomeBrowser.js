@@ -5,6 +5,7 @@
 // proteome version, so its features are shared and its runs can say which
 // proteome they used.
 import React, { useCallback, useEffect, useState } from 'react';
+import { SortHeader, useSortedRows } from '../utils/sortableTable';
 import styles from '../styles/SequencesTab.module.css';
 
 const PAGE_SIZE = 50;
@@ -88,6 +89,21 @@ function ProteomeBrowser({ api, onAdd, adding, targetLabel }) {
   const pages = Math.max(1, Math.ceil(data.total / PAGE_SIZE));
   const allOnPagePicked = data.items.length > 0 && data.items.every(i => picked.has(i.accession));
 
+  const proteomeTable = useSortedRows(library ? library.proteomes : [], {
+    organism: item => item.organism,
+    upid: item => item.upid,
+    release: { value: item => item.release, type: 'text' },
+    content: item => (item.subset === 'reviewed' ? 'Reviewed only' : 'All entries'),
+    sequences: { value: item => item.entries, type: 'number' }
+  }, { rememberAs: 'alphapulldown.sequences.proteomes' });
+  // The proteins come a page at a time: sorting orders the page shown.
+  const entryTable = useSortedRows(data.items, {
+    accession: item => item.accession,
+    gene: item => item.gene,
+    description: item => item.description,
+    length: { value: item => item.length, type: 'number' }
+  }, { rememberAs: 'alphapulldown.sequences.proteome-entries' });
+
   if (!library) return <p className={styles.empty}>{error || 'Loading...'}</p>;
   if (!library.configured) {
     return <p className={styles.warningBanner}>The shared library has no folder yet, so there are no proteomes to browse. Ask staff to set it up in Setup.</p>;
@@ -102,9 +118,9 @@ function ProteomeBrowser({ api, onAdd, adding, targetLabel }) {
       ) : (
         <div className={styles.tableWrapper}>
           <table className={styles.table}>
-            <thead><tr><th>Organism</th><th>Proteome</th><th>UniProt release</th><th>Content</th><th className={styles.numeric}>Sequences</th><th /></tr></thead>
+            <thead><tr><SortHeader table={proteomeTable} column="organism">Organism</SortHeader><SortHeader table={proteomeTable} column="upid">Proteome</SortHeader><SortHeader table={proteomeTable} column="release">UniProt release</SortHeader><SortHeader table={proteomeTable} column="content">Content</SortHeader><SortHeader table={proteomeTable} column="sequences" className={styles.numeric}>Sequences</SortHeader><th /></tr></thead>
             <tbody>
-              {library.proteomes.map(item => (
+              {proteomeTable.rows.map(item => (
                 <tr key={item.id}>
                   <td>{item.organism}</td>
                   <td className={styles.mono}>{item.upid}</td>
@@ -156,11 +172,11 @@ function ProteomeBrowser({ api, onAdd, adding, targetLabel }) {
               <thead>
                 <tr>
                   <th><input type="checkbox" checked={allOnPagePicked} onChange={togglePage} aria-label="Select this page" /></th>
-                  <th>Accession</th><th>Gene</th><th>Description</th><th className={styles.numeric}>Length</th>
+                  <SortHeader table={entryTable} column="accession">Accession</SortHeader><SortHeader table={entryTable} column="gene">Gene</SortHeader><SortHeader table={entryTable} column="description">Description</SortHeader><SortHeader table={entryTable} column="length" className={styles.numeric}>Length</SortHeader>
                 </tr>
               </thead>
               <tbody>
-                {data.items.map(item => (
+                {entryTable.rows.map(item => (
                   <tr key={item.accession}>
                     <td><input type="checkbox" checked={picked.has(item.accession)} onChange={() => togglePicked(item.accession)} /></td>
                     <td className={styles.mono}>{item.accession}</td>

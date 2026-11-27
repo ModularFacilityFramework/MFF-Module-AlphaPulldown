@@ -6,6 +6,7 @@
 // methods section. Only ever touches core through the coreApi prop.
 import React, { useCallback, useEffect, useState } from 'react';
 import { usePageState } from '../utils/pageState';
+import { SortHeader, useSortedRows } from '../utils/sortableTable';
 import styles from '../styles/SequencesTab.module.css';
 
 const POLL_MS = 2000;
@@ -20,16 +21,33 @@ function day(value) {
   return value ? String(value).slice(0, 10) : '';
 }
 
+// "Built with" as shown; empty until the first job has recorded it.
+function builtWith(set) {
+  const sw = set.environment && set.environment.software;
+  return sw ? `AlphaPulldown ${sw.alphapulldown}, AlphaFold 3 ${sw.alphafold3 || '?'}, JAX ${sw.jax || '?'}` : '';
+}
+
+function databaseList(set) {
+  return set.environment ? set.environment.databases.map(d => `${d.name}${d.modified ? ` (${d.modified})` : ''}`).join('; ') : '';
+}
+
 function FeatureSets({ sets }) {
+  const table = useSortedRows(sets, {
+    key: { value: set => set.key, type: 'text' },
+    proteins: { value: set => set.features, type: 'number' },
+    cutoff: { value: set => set.maxTemplateDate, type: 'date' },
+    software: builtWith,
+    databases: databaseList
+  }, { rememberAs: 'alphapulldown.library.feature-sets' });
   if (sets.length === 0) return <p className={styles.hint}>No features built from this proteome yet. They are built the first time a project that uses it runs the Features tab.</p>;
   return (
     <div className={styles.tableWrapper}>
       <table className={styles.table}>
         <thead>
-          <tr><th>Feature set</th><th className={styles.numeric}>Proteins</th><th>Template cut-off</th><th>Built with</th><th>Databases</th></tr>
+          <tr><SortHeader table={table} column="key">Feature set</SortHeader><SortHeader table={table} column="proteins" className={styles.numeric}>Proteins</SortHeader><SortHeader table={table} column="cutoff">Template cut-off</SortHeader><SortHeader table={table} column="software">Built with</SortHeader><SortHeader table={table} column="databases">Databases</SortHeader></tr>
         </thead>
         <tbody>
-          {sets.map(set => {
+          {table.rows.map(set => {
             const sw = set.environment && set.environment.software;
             return (
               <tr key={set.id}>
@@ -129,6 +147,22 @@ function LibraryTab({ coreApi }) {
       .catch(err => setError(err.response?.data?.error || err.message));
   }
 
+  const searchTable = useSortedRows(found || [], {
+    upid: p => p.upid,
+    organism: p => p.organism,
+    taxon: { value: p => p.taxId, type: 'number' },
+    proteins: { value: p => p.proteinCount, type: 'number' }
+  }, { rememberAs: 'alphapulldown.library.search' });
+  const heldTable = useSortedRows(library ? library.proteomes : [], {
+    organism: p => p.organism,
+    upid: p => p.upid,
+    release: { value: p => p.release, type: 'text' },
+    content: p => (p.subset === 'reviewed' ? 'Reviewed only' : 'All entries'),
+    sequences: { value: p => p.entries, type: 'number' },
+    added: { value: p => p.downloadedAt, type: 'date' },
+    featureSets: { value: p => p.featureSets.length, type: 'number' }
+  }, { rememberAs: 'alphapulldown.library.proteomes' });
+
   if (!library) return <div className={styles.empty}>{error || 'Loading...'}</div>;
 
   if (!library.configured) {
@@ -170,9 +204,9 @@ function LibraryTab({ coreApi }) {
       {found && found.length > 0 && (
         <div className={styles.tableWrapper}>
           <table className={styles.table}>
-            <thead><tr><th>Proteome</th><th>Organism</th><th>Taxon</th><th className={styles.numeric}>Proteins</th><th /></tr></thead>
+            <thead><tr><SortHeader table={searchTable} column="upid">Proteome</SortHeader><SortHeader table={searchTable} column="organism">Organism</SortHeader><SortHeader table={searchTable} column="taxon">Taxon</SortHeader><SortHeader table={searchTable} column="proteins" className={styles.numeric}>Proteins</SortHeader><th /></tr></thead>
             <tbody>
-              {found.map(p => (
+              {searchTable.rows.map(p => (
                 <tr key={p.upid}>
                   <td className={styles.mono}>{p.upid}</td>
                   <td>{p.organism}</td>
@@ -201,12 +235,11 @@ function LibraryTab({ coreApi }) {
           <table className={styles.table}>
             <thead>
               <tr>
-                <th>Organism</th><th>Proteome</th><th>UniProt release</th><th>Content</th>
-                <th className={styles.numeric}>Sequences</th><th>Added</th><th>Feature sets</th><th />
+                <SortHeader table={heldTable} column="organism">Organism</SortHeader><SortHeader table={heldTable} column="upid">Proteome</SortHeader><SortHeader table={heldTable} column="release">UniProt release</SortHeader><SortHeader table={heldTable} column="content">Content</SortHeader><SortHeader table={heldTable} column="sequences" className={styles.numeric}>Sequences</SortHeader><SortHeader table={heldTable} column="added">Added</SortHeader><SortHeader table={heldTable} column="featureSets">Feature sets</SortHeader><th />
               </tr>
             </thead>
             <tbody>
-              {library.proteomes.map(p => (
+              {heldTable.rows.map(p => (
                 <React.Fragment key={p.id}>
                   <tr>
                     <td>{p.organism}</td>

@@ -2,6 +2,7 @@
 // one organism), or paste a list of accessions. The backend fetches the
 // sequences, so nothing but accessions travels from here.
 import React, { useState } from 'react';
+import { SortHeader, useSortedRows } from '../utils/sortableTable';
 import styles from '../styles/SequencesTab.module.css';
 
 const ACCESSIONS_PER_REQUEST = 500;
@@ -16,6 +17,14 @@ function UniprotSearch({ api, onAdd, adding, targetLabel }) {
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState('');
   const [accessionText, setAccessionText] = useState('');
+
+  const table = useSortedRows(results || [], {
+    accession: r => r.accession,
+    gene: r => r.gene,
+    name: r => r.name,
+    organism: r => r.organism,
+    length: { value: r => r.length || null, type: 'number' }
+  }, { rememberAs: 'alphapulldown.sequences.uniprot' });
 
   function search(e) {
     e.preventDefault();
@@ -102,11 +111,11 @@ function UniprotSearch({ api, onAdd, adding, targetLabel }) {
                   <thead>
                     <tr>
                       <th><input type="checkbox" checked={picked.size === results.length} onChange={toggleAll} aria-label="Select all" /></th>
-                      <th>Accession</th><th>Gene</th><th>Protein</th><th>Organism</th><th className={styles.numeric}>Length</th>
+                      <SortHeader table={table} column="accession">Accession</SortHeader><SortHeader table={table} column="gene">Gene</SortHeader><SortHeader table={table} column="name">Protein</SortHeader><SortHeader table={table} column="organism">Organism</SortHeader><SortHeader table={table} column="length" className={styles.numeric}>Length</SortHeader>
                     </tr>
                   </thead>
                   <tbody>
-                    {results.map(r => (
+                    {table.rows.map(r => (
                       <tr key={r.accession}>
                         <td><input type="checkbox" checked={picked.has(r.accession)} onChange={() => toggle(r.accession)} /></td>
                         <td className={styles.mono}>{r.accession}</td>

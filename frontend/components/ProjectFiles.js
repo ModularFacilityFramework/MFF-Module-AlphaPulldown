@@ -3,6 +3,7 @@
 // lists. Written on demand, and again by the later stages; a file older than
 // the last change to the selection is flagged as out of date.
 import React, { useCallback, useEffect, useState } from 'react';
+import { SortHeader, useSortedRows } from '../utils/sortableTable';
 import styles from '../styles/SequencesTab.module.css';
 
 function downloadBlob(filename, blob) {
@@ -47,6 +48,12 @@ function ProjectFiles({ api, project, refreshKey }) {
   const anyWritten = files.some(f => f.exists);
   const isStale = f => f.exists && info.projectUpdatedAt && new Date(f.modified) < new Date(info.projectUpdatedAt);
 
+  const table = useSortedRows(files, {
+    name: f => f.name,
+    size: { value: f => (f.exists ? f.size : null), type: 'number' },
+    written: { value: f => (f.exists ? f.modified : null), type: 'date' }
+  }, { rememberAs: 'alphapulldown.files.list' });
+
   return (
     <div className={styles.panel}>
       <h4 className={styles.panelTitle}>Files for AlphaPulldown</h4>
@@ -68,9 +75,9 @@ function ProjectFiles({ api, project, refreshKey }) {
       {info && (
         <div className={styles.tableWrapper}>
           <table className={styles.table}>
-            <thead><tr><th>File</th><th className={styles.numeric}>Size</th><th>Written</th><th /></tr></thead>
+            <thead><tr><SortHeader table={table} column="name">File</SortHeader><SortHeader table={table} column="size" className={styles.numeric}>Size</SortHeader><SortHeader table={table} column="written">Written</SortHeader><th /></tr></thead>
             <tbody>
-              {files.map(f => (
+              {table.rows.map(f => (
                 <tr key={f.name}>
                   <td className={styles.mono}>{f.name}</td>
                   <td className={styles.numeric}>{f.exists ? `${(f.size / 1024).toFixed(1)} KB` : '—'}</td>

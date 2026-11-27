@@ -6,6 +6,7 @@
 // prediction at first - target and baits are co-folded.
 import React, { useState } from 'react';
 import { usePageState } from '../utils/pageState';
+import { SortHeader, useSortedRows } from '../utils/sortableTable';
 import shared from '../styles/SequencesTab.module.css';
 import styles from '../styles/TargetTab.module.css';
 
@@ -54,6 +55,14 @@ function TargetModel({ api, stateKey, targetId, canChange, model, firstAccession
     });
   }
 
+  const matches = useSortedRows(model ? model.mapping : [], {
+    chain: m => m.chain,
+    modelChain: m => m.modelChain,
+    how: m => STATUS_WORDS[m.status] || m.status,
+    identity: { value: m => (m.modelChain ? m.identity : null), type: 'number' },
+    coverage: { value: m => (m.modelChain ? m.coverage : null), type: 'number' }
+  }, { rememberAs: 'alphapulldown.target.model-match' });
+
   const showForms = !model || replacing;
 
   return (
@@ -76,9 +85,9 @@ function TargetModel({ api, stateKey, targetId, canChange, model, firstAccession
       {model && (
         <div className={shared.tableWrapper}>
           <table className={shared.table}>
-            <thead><tr><th>Target chain</th><th>Model chain</th><th>How they match</th><th className={shared.numeric}>Identity</th><th className={shared.numeric}>Coverage</th></tr></thead>
+            <thead><tr><SortHeader table={matches} column="chain">Target chain</SortHeader><SortHeader table={matches} column="modelChain">Model chain</SortHeader><SortHeader table={matches} column="how">How they match</SortHeader><SortHeader table={matches} column="identity" className={shared.numeric}>Identity</SortHeader><SortHeader table={matches} column="coverage" className={shared.numeric}>Coverage</SortHeader></tr></thead>
             <tbody>
-              {model.mapping.map(m => (
+              {matches.rows.map(m => (
                 <tr key={m.chain}>
                   <td>{m.chain}</td>
                   <td>{m.modelChain || '-'}</td>
