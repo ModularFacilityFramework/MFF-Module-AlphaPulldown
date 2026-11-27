@@ -80,7 +80,7 @@ function TargetEditor({ coreApi, projectId, targetId, onChanged, onSaved, onBack
   const [libraryMessage, setLibraryMessage] = useState('');
   const mounted = useRef(true);
   // Where this target's unsaved edits are remembered (per user, per target).
-  const stateKey = `target:${projectId}:${targetId || 'new'}`;
+  const stateKey = `sp-target:${projectId}:${targetId || 'new'}`;
   const memory = usePageDraft(`${stateKey}:draft`);
 
   useEffect(() => () => { mounted.current = false; }, []);
@@ -105,7 +105,7 @@ function TargetEditor({ coreApi, projectId, targetId, onChanged, onSaved, onBack
     const request = targetId
       ? api.get(`/alphapulldown/targets/${targetId}`)
       : api.get(`/alphapulldown/projects/${projectId}/targets`).then(res => ({
-        data: { project: res.data.project, readOnly: false, ownerName: '', target: null, chimeraWarning: res.data.chimeraWarning }
+        data: { project: res.data.project, readOnly: res.data.readOnly, readOnlyReason: res.data.readOnlyReason, ownerName: '', target: null, chimeraWarning: res.data.chimeraWarning }
       }));
     request
       .then(res => {
@@ -199,10 +199,18 @@ function TargetEditor({ coreApi, projectId, targetId, onChanged, onSaved, onBack
     <div>
       {readOnly && (
         <div className={shared.warningBanner}>
-          <span>{`Read-only: this target belongs to ${payload.ownerName || 'another user'}. Developers and administrators can read every target but not change it.`}</span>
+          <span>{`Read-only${payload.ownerName ? ` (target made by ${payload.ownerName})` : ''}. ${payload.readOnlyReason || 'You cannot change this project.'}`}</span>
           {onBack && <button type="button" className={shared.btnGray} onClick={onBack}>Back</button>}
         </div>
       )}
+      {!readOnly && onBack && (
+        <div className={shared.warningBanner}>
+          <span>{`${payload.project.number} ${payload.project.name}${payload.ownerName ? ` - target made by ${payload.ownerName}` : ''}. You can change it: you have write access to this project.`}</span>
+          <button type="button" className={shared.btnGray} onClick={onBack}>Back</button>
+        </div>
+      )}
+      {payload.itemWarning && <p className={shared.errorText}>{payload.itemWarning}</p>}
+      {!readOnly && !onBack && payload.ownerName && <p className={shared.hint}>{`Made by ${payload.ownerName}. Everyone with write access to this project can change it.`}</p>}
 
       <div className={shared.panel}>
         <h3 className={shared.panelTitle}>

@@ -5,6 +5,7 @@
 const express = require('express');
 const manifest = require('../module.manifest.json');
 const createPool = require('./config/database');
+const scienceMove = require('./services/scienceMove');
 const buildSettingsRouter = require('./routes/settingsRoutes');
 const buildProjectRouter = require('./routes/projectRoutes');
 const buildSequenceRouter = require('./routes/sequenceRoutes');
@@ -32,6 +33,8 @@ module.exports = function register(coreApi) {
   router.use(buildCofoldRouter(moduleApi));
   router.use(buildSpeedRouter(moduleApi));
   router.use(buildPageAccessRouter(moduleApi));
+  // Old projects of this module are moved into Science in the background.
+  scienceMove.start(moduleApi);
   return {
     router,
     moduleId: manifest.id,

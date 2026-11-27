@@ -234,19 +234,16 @@ async function deleteTarget(conn, targetId) {
   await conn.query('DELETE FROM alphapulldown_targets WHERE id = ?', [targetId]);
 }
 
-// Everything a project's removal must remove with it: all its targets.
-async function deleteForProject(conn, projectId) {
-  const rows = await conn.query('SELECT id FROM alphapulldown_targets WHERE project_id = ?', [projectId]);
-  for (const row of rows) await deleteTarget(conn, row.id);
-}
-
-// The project's targets in short, for the target selector and the locks.
-async function listForProject(conn, projectId) {
+// A project's targets in short, for the target selector and the locks.
+// `linkIds`: the link rows of the Science project (one per user who has work
+// in it).
+async function listForLinks(conn, linkIds) {
+  if (linkIds.length === 0) return [];
   const rows = await conn.query(
     `SELECT t.id, t.name, t.status, t.genome_organism, t.genome_upid, t.updated_at, t.confirmed_at,
             (SELECT COUNT(*) FROM alphapulldown_target_chains c WHERE c.target_id = t.id) AS chain_count
-     FROM alphapulldown_targets t WHERE t.project_id = ? ORDER BY t.id`,
-    [projectId]
+     FROM alphapulldown_targets t WHERE t.project_id IN (${linkIds.map(() => '?').join(', ')}) ORDER BY t.id`,
+    linkIds
   );
   return rows.map(r => ({
     id: Number(r.id),
@@ -270,6 +267,5 @@ module.exports = {
   validateTarget,
   libraryVersionFor,
   deleteTarget,
-  deleteForProject,
-  listForProject
+  listForLinks
 };

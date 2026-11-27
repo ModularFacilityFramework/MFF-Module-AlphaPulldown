@@ -1,11 +1,8 @@
 // Small helpers shared by the route files: a status-carrying error, a
 // handler wrapper that owns the database connection, and the two lookups
 // every project route starts with.
-const { findProject } = require('./projectAccess');
-
-function httpError(status, message) {
-  return Object.assign(new Error(message), { status });
-}
+const { httpError } = require('./httpError');
+const { openOwnLink } = require('./scienceProjects');
 
 function makeHelpers(coreApi) {
   // Wraps a handler that needs a database connection: releases it, turns
@@ -23,10 +20,10 @@ function makeHelpers(coreApi) {
     };
   }
 
+  // :id is a Science project; returns the caller's link row in it (reading
+  // needs read access, anything else write access).
   async function requireProject(conn, req) {
-    const project = await findProject(conn, req.params.id, req.user.id);
-    if (!project) throw httpError(404, 'Project not found');
-    return project;
+    return openOwnLink(coreApi, conn, req);
   }
 
   async function requireWorkspace(req) {

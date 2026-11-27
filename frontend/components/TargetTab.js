@@ -10,6 +10,9 @@ function when(value) {
   return value ? new Date(value).toLocaleString('en-GB') : '';
 }
 
+// "P-0001 Title"; a project that could not be read has no number.
+const projectLabel = t => [t.projectNumber, t.projectName].filter(Boolean).join(' ');
+
 function StaffOverview({ api, onOpen }) {
   const [targets, setTargets] = useState(null);
   const [error, setError] = useState('');
@@ -22,7 +25,7 @@ function StaffOverview({ api, onOpen }) {
 
   const table = useSortedRows(targets || [], {
     owner: t => t.ownerName || t.ownerId,
-    project: t => `P${t.projectNumber} - ${t.projectName}`,
+    project: projectLabel,
     name: t => t.name,
     status: t => t.status,
     genome: t => t.genome,
@@ -45,7 +48,7 @@ function StaffOverview({ api, onOpen }) {
                 <tr key={t.targetId}>
                   <td><button type="button" className={shared.btnBlue} onClick={() => onOpen(t)}>View</button></td>
                   <td>{t.ownerName || t.ownerId}</td>
-                  <td>{`P${t.projectNumber} - ${t.projectName}`}</td>
+                  <td>{projectLabel(t)}</td>
                   <td>{t.name}</td>
                   <td>{t.status}</td>
                   <td>{t.genome}</td>
@@ -103,7 +106,7 @@ function TargetTab({ coreApi, project, targetId, onChanged, onSaved, isStaff }) 
             onSaved={onSaved}
           />
         )
-        : <div className={shared.empty}>Create a project above to define its targets.</div>}
+        : <div className={shared.empty}>Pick a project above to define its targets. Projects are created and shared in Science; picking one needs write access to it.</div>}
       {isStaff && <StaffOverview api={coreApi.api} onOpen={setViewing} />}
     </div>
   );

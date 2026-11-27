@@ -20,6 +20,7 @@ const { loadSamples, recordSamples } = require('../services/speedRecorder');
 const abcfold = require('../services/abcfoldClient');
 const slurm = require('../services/slurmClient');
 const { httpError, makeHelpers } = require('../services/routeHelpers');
+const projectItems = require('../services/projectItems');
 const cofold = require('../services/cofoldPlan');
 const library = require('../services/libraryService');
 const provenance = require('../services/provenance');
@@ -88,6 +89,15 @@ module.exports = function buildRouter(coreApi) {
   // Runs being advanced right now by this process (two open tabs must not
   // both submit); the claim on each row guards across processes.
   const syncing = new Set();
+
+  // A run's line on its Science project's page. A failure never fails the run.
+  function listRun(req, project, runId, status) {
+    return projectItems.registerItem(coreApi, req, project.science.id, projectItems.describeItem(projectItems.ITEM_TYPES.cofoldRun, runId, { status }));
+  }
+
+  function overallState(run, counts) {
+    return projectItems.cofoldState(!!run.cancelled_at, counts);
+  }
 
   async function requireRun(conn, req, project) {
     const rows = await conn.query(
@@ -280,7 +290,8 @@ module.exports = function buildRouter(coreApi) {
       await conn.query('DELETE FROM alphapulldown_cofold_runs WHERE id = ?', [runId]);
       throw err;
     }
-    res.status(201).json({ id: runId, total: pairs.length });
+    const itemWarning = await listRun(req, project, runId, 'queued');
+    res.status(201).json(itemWarning ? { id: runId, total: pairs.length, itemWarning } : { id: runId, total: pairs.length });
   }));
 
   async function countsFor(conn, runId) {
@@ -440,13 +451,18 @@ module.exports = function buildRouter(coreApi) {
     syncing.add(run.id);
     try {
       const deadline = Date.now() + SYNC_BUDGET_MS;
+      const before = overallState(run, await countsFor(conn, run.id));
       result.statusError = await refreshInFlight(conn, req, run, deadline);
       result.ingestedNow = await ingestFinished(conn, run);
-      if (!run.cancelled_at) {
+      // Reading a run must never start jobs: queued pairs wait while the
+      // caller has no write access (or the project is archived).
+      if (!run.cancelled_at && project.science.canWrite) {
         const submitted = await submitQueued(conn, req, run, project, workspace, deadline);
         result.submitError = submitted.error;
         result.submittedNow = submitted.submitted;
       }
+      const after = overallState(run, await countsFor(conn, run.id));
+      if (after !== before && project.science.canWrite) await listRun(req, project, run.id, after);
     } finally {
       syncing.delete(run.id);
     }
@@ -570,6 +586,7 @@ module.exports = function buildRouter(coreApi) {
         return result.success;
       })));
     }
+    await listRun(req, project, run.id, 'cancelled');
     const cancelled = outcomes.filter(Boolean).length;
     const uncancellable = outcomes.length - cancelled;
     res.json({ success: true, dropped: Number(dropped.affectedRows), cancelled, uncancellable });
@@ -606,6 +623,7 @@ module.exports = function buildRouter(coreApi) {
     if (states.some(r => !cofold.isFinishedState(r.state))) throw httpError(409, 'Cancel the run before deleting it.');
     await conn.query('DELETE FROM alphapulldown_cofold_items WHERE run_id = ?', [run.id]);
     await conn.query('DELETE FROM alphapulldown_cofold_runs WHERE id = ?', [run.id]);
+    await projectItems.removeItem(coreApi, req, project.science.id, projectItems.ITEM_TYPES.cofoldRun, run.id);
     res.json({ success: true });
   }));
 

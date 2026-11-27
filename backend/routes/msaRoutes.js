@@ -17,6 +17,7 @@ const { msaProfile } = require('../services/speedProfiles');
 const { recordSamples } = require('../services/speedRecorder');
 const slurm = require('../services/slurmClient');
 const { httpError, makeHelpers } = require('../services/routeHelpers');
+const projectItems = require('../services/projectItems');
 const plan = require('../services/msaPlan');
 const library = require('../services/libraryService');
 const libraryPaths = require('../services/libraryPaths');
@@ -49,6 +50,11 @@ module.exports = function buildRouter(coreApi) {
   const router = express.Router();
   const auth = coreApi.authenticateToken;
   const { withConn, requireProject, requireWorkspace } = makeHelpers(coreApi);
+
+  // A run's line on its Science project's page. A failure never fails the run.
+  function listRun(req, project, runId, status) {
+    return projectItems.registerItem(coreApi, req, project.science.id, projectItems.describeItem(projectItems.ITEM_TYPES.msaRun, runId, { status }));
+  }
 
   async function requireRun(conn, req, project) {
     const rows = await conn.query(
@@ -250,12 +256,13 @@ module.exports = function buildRouter(coreApi) {
       await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
       throw err;
     }
-    res.status(201).json({ id: runId });
+    const itemWarning = await listRun(req, project, runId, 'PENDING');
+    res.status(201).json(itemWarning ? { id: runId, itemWarning } : { id: runId });
   }));
 
   // Asks Slurm where an unfinished run is and stores the answer. A Slurm
   // module that cannot be reached leaves the stored state alone and says so.
-  async function refreshRun(conn, req, run) {
+  async function refreshRun(conn, req, run, project) {
     if (plan.isTerminalState(run.state) || !run.slurm_job_id) return { run };
     const status = await slurm.getJobStatus(coreApi, req.headers.authorization, run.slurm_job_id);
     if (!status.success) return { run, statusError: status.error || 'Slurm status unavailable' };
@@ -266,6 +273,8 @@ module.exports = function buildRouter(coreApi) {
       ended_at: toDate(status.endedAt) || run.ended_at
     };
     await conn.query('UPDATE alphapulldown_msa_runs SET state = ?, started_at = ?, ended_at = ? WHERE id = ?', [next.state, next.started_at, next.ended_at, run.id]);
+    // Only a writer may change the project's page; a reader's refresh leaves it.
+    if (next.state !== run.state && project.science.canWrite) await listRun(req, project, run.id, next.state);
     return { run: next };
   }
 
@@ -354,7 +363,7 @@ module.exports = function buildRouter(coreApi) {
     const runs = [];
     let ingestedNow = 0;
     for (const row of rows) {
-      const refreshed = await refreshRun(conn, req, row);
+      const refreshed = await refreshRun(conn, req, row, project);
       const { statusError } = refreshed;
       let run = refreshed.run;
       let timings = [];
@@ -373,7 +382,7 @@ module.exports = function buildRouter(coreApi) {
   router.get('/projects/:id/msa/runs/:runId', auth, withConn('Failed to read the MSA run', async (req, res, conn) => {
     const project = await requireProject(conn, req);
     const workspace = await requireWorkspace(req);
-    const refreshed = await refreshRun(conn, req, await requireRun(conn, req, project));
+    const refreshed = await refreshRun(conn, req, await requireRun(conn, req, project), project);
     const { statusError } = refreshed;
     const dir = runPath(workspace, project, refreshed.run);
     await ingestIfDone(conn, refreshed.run, dir);
@@ -443,6 +452,7 @@ module.exports = function buildRouter(coreApi) {
     if (run.slurm_job_id && !plan.isTerminalState(run.state)) throw httpError(409, 'Cancel the run before deleting it.');
     const workspace = await coreApi.getUserWorkspacePath(req.user);
     await conn.query('DELETE FROM alphapulldown_msa_runs WHERE id = ?', [run.id]);
+    await projectItems.removeItem(coreApi, req, project.science.id, projectItems.ITEM_TYPES.msaRun, run.id);
     let folderRemoved = false;
     if (workspace.active && run.run_dir) {
       try {

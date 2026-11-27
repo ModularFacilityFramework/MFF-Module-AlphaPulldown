@@ -163,6 +163,8 @@ CREATE TABLE IF NOT EXISTS alphapulldown_targets (
   model_mapping_json MEDIUMTEXT NULL,
   model_fetched_at DATETIME NULL,
   model_accepted_at DATETIME NULL,
+  -- Whose workspace holds the model file (whoever loaded it).
+  model_user_id BIGINT NULL,
   validated_at DATETIME NULL,
   chimera_json MEDIUMTEXT NULL,
   confirmed_at DATETIME NULL,
@@ -229,7 +231,15 @@ CREATE TABLE IF NOT EXISTS alphapulldown_projects (
   mode VARCHAR(20) NOT NULL DEFAULT 'pulldown',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  UNIQUE KEY uniq_owner_project_number (owner_id, project_number)
+  -- Projects belong to the Science module. This row only links one user's
+  -- rows (and workspace folder P<project_number>) to a Science project; NULL
+  -- = a project from before the move, still to be moved.
+  science_project_id BIGINT NULL,
+  -- 1 while a moved project's targets and runs are not all listed on its
+  -- Science project's page yet.
+  items_pending TINYINT NOT NULL DEFAULT 0,
+  UNIQUE KEY uniq_owner_project_number (owner_id, project_number),
+  KEY idx_science_project (science_project_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- The proteins chosen for a project - only the selected ones, never a whole

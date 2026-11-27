@@ -8,7 +8,7 @@ const fs = require('fs').promises;
 const path = require('path');
 const { rolesForMode } = require('../services/sequenceStats');
 const { projectDir } = require('../services/projectPaths');
-const { findProject } = require('../services/projectAccess');
+const { openOwnLink } = require('../services/scienceProjects');
 const fasta = require('../services/fastaTools');
 const uniprot = require('../services/uniprotClient');
 const libraryStore = require('../services/libraryStore');
@@ -97,10 +97,10 @@ module.exports = function buildRouter(coreApi) {
     };
   }
 
+  // :id is a Science project; returns the caller's link row in it (reading
+  // needs read access, anything else write access).
   async function requireProject(conn, req) {
-    const project = await findProject(conn, req.params.id, req.user.id);
-    if (!project) throw httpError(404, 'Project not found');
-    return project;
+    return openOwnLink(coreApi, conn, req);
   }
 
   async function requireWorkspace(req) {

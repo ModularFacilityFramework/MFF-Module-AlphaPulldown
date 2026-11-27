@@ -9,8 +9,10 @@
 // guide is explicit that a module shouldn't add a second title on top of
 // either.
 //
-// A project (ProjectBar) holds one or many targets (TargetBar). The tabs
-// follow the workflow: Target -> Baits -> AlphaPulldown -> Modelling (ABCFold)
+// Projects belong to the Science module: one is picked with core's project
+// picker (write access is needed to change or run anything, so read-only
+// projects are greyed out there with the reason). A project holds one or many
+// targets (TargetBar). The tabs follow the workflow: Target -> Baits -> AlphaPulldown -> Modelling (ABCFold)
 // -> Summary. Only Target works so far; each later tab is visible but locked
 // until the step before it is confirmed (and until it is built). The Library
 // tab is not tied to a project: it is the proteomes and feature sets every
@@ -21,7 +23,6 @@
 // every tab plus the staff-only Speed statistics and Page Access tabs; everyone else only
 // sees tabs a role of theirs has been granted.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import ProjectBar from './ProjectBar';
 import TargetBar, { NEW_TARGET } from './TargetBar';
 import TargetTab from './TargetTab';
 import BaitsTab from './BaitsTab';
@@ -35,6 +36,7 @@ import styles from '../styles/AlphaPulldownTab.module.css';
 import targetStyles from '../styles/TargetTab.module.css';
 
 const never = () => false;
+const NO_TARGETS = { projectId: null, project: null, list: [], readOnly: false, readOnlyReason: '', error: '' };
 
 // usesTarget: shows the target selector. isOpen({ project, target }): the tab
 // is greyed out (locked) until it returns true.
@@ -58,22 +60,23 @@ const TABS = [
 
 function AlphaPulldownPages({ coreApi, userData }) {
   const { api, useRoles } = coreApi;
+  const ProjectPicker = coreApi.ui && coreApi.ui.ProjectPicker;
   const { canManageUsers, roles: userRoles } = useRoles(userData);
   const [access, setAccess] = useState(null);
   // What the user last had open is remembered per user (see utils/pageState):
-  // the tab, the project and, per project, the target. A remembered item that
-  // no longer exists falls back to the first one below, without an error.
+  // the tab, the Science project and, per project, the target. A remembered
+  // item that no longer exists falls back without an error (the picker drops a
+  // project that is gone, archived or no longer writable).
   const [activeTab, setActiveTab] = usePageState('tab', null);
-  const [projects, setProjects] = useState(null);
-  const [projectId, setProjectId] = usePageState('project', null);
-  const [chosenTargets, setChosenTargets] = usePageState('targets', {});
+  const [projectId, setProjectId] = usePageState('science-project', null);
+  const [chosenTargets, setChosenTargets] = usePageState('science-targets', {});
   const chosenRef = useRef(chosenTargets);
   chosenRef.current = chosenTargets;
   // The selected project's targets, kept with the project they belong to so
   // switching project never shows the previous project's targets.
-  const [targetState, setTargetState] = useState({ projectId: null, list: [], readOnly: false });
+  const [targetState, setTargetState] = useState(NO_TARGETS);
   const [targetId, setTargetId] = useState(NEW_TARGET);
-  const [loadError, setLoadError] = useState('');
+  const [notice, setNotice] = useState('');
 
   useEffect(() => {
     api.get('/alphapulldown/page-access')
@@ -81,24 +84,10 @@ function AlphaPulldownPages({ coreApi, userData }) {
       .catch(() => setAccess({}));
   }, [api]);
 
-  // Reloads the project list and keeps the current selection when it still
-  // exists, otherwise selects `preferId` (a just-created project) or the
-  // newest one.
-  const loadProjects = useCallback((preferId) => api.get('/alphapulldown/projects')
-    .then(res => {
-      setProjects(res.data);
-      setProjectId(prev => {
-        if (preferId && res.data.some(p => p.id === preferId)) return preferId;
-        if (prev && res.data.some(p => p.id === prev)) return prev;
-        return res.data.length > 0 ? res.data[0].id : null;
-      });
-    })
-    .catch(err => {
-      setLoadError(err.response?.data?.error || err.message);
-      setProjects([]);
-    }), [api, setProjectId]);
-
-  useEffect(() => { loadProjects(); }, [loadProjects]);
+  const chooseProject = useCallback(id => {
+    setNotice('');
+    setProjectId(id === null || id === undefined ? null : Number(id));
+  }, [setProjectId]);
 
   // Reloads the selected project's targets and keeps the selection when it
   // still exists, otherwise selects `preferId` (a just-saved target), the
@@ -108,7 +97,7 @@ function AlphaPulldownPages({ coreApi, userData }) {
     return api.get(`/alphapulldown/projects/${projectId}/targets`)
       .then(res => {
         const list = res.data.targets;
-        setTargetState({ projectId, list, readOnly: res.data.readOnly });
+        setTargetState({ projectId, project: res.data.project, list, readOnly: res.data.readOnly, readOnlyReason: res.data.readOnlyReason || '', error: '' });
         setTargetId(prev => {
           if (preferId && list.some(t => t.id === preferId)) return preferId;
           if (prev === NEW_TARGET) return NEW_TARGET; // the user's own choice, or no target yet
@@ -116,7 +105,7 @@ function AlphaPulldownPages({ coreApi, userData }) {
           return list.length > 0 ? list[0].id : NEW_TARGET;
         });
       })
-      .catch(() => setTargetState({ projectId, list: [], readOnly: false }));
+      .catch(err => setTargetState({ ...NO_TARGETS, projectId, error: err.response?.data?.error || err.message }));
   }, [api, projectId]);
 
   useEffect(() => {
@@ -124,7 +113,7 @@ function AlphaPulldownPages({ coreApi, userData }) {
     // yet: loadTargets picks the first target, or a new one.
     const remembered = chosenRef.current[projectId];
     setTargetId(remembered === NEW_TARGET || typeof remembered === 'number' ? remembered : null);
-    setTargetState({ projectId: null, list: [], readOnly: false });
+    setTargetState(NO_TARGETS);
     loadTargets();
   }, [loadTargets, projectId]);
 
@@ -136,33 +125,20 @@ function AlphaPulldownPages({ coreApi, userData }) {
   }, [projectId, targetId, targetState.projectId, setChosenTargets]);
 
   // Something in the selected project changed (a target was saved or
-  // confirmed): refresh the target list and the project list's counts.
-  const handleChanged = useCallback(() => {
-    loadTargets();
-    loadProjects();
-  }, [loadTargets, loadProjects]);
+  // confirmed): refresh the target list.
+  const handleChanged = useCallback(() => { loadTargets(); }, [loadTargets]);
 
-  const handleTargetSaved = useCallback(id => {
-    loadTargets(id);
-    loadProjects();
-  }, [loadTargets, loadProjects]);
+  const handleTargetSaved = useCallback(id => { loadTargets(id); }, [loadTargets]);
 
   function handleDeleteTarget(id) {
-    return api.delete(`/alphapulldown/targets/${id}`).then(() => {
+    return api.delete(`/alphapulldown/targets/${id}`).then(res => {
+      setNotice(res.data?.itemWarning || '');
       setTargetId(null); // loadTargets then picks the first remaining target, or a new one
-      return Promise.all([loadTargets(), loadProjects()]);
+      return loadTargets();
     });
   }
 
-  function handleCreate(name, mode) {
-    return api.post('/alphapulldown/projects', { name, mode }).then(res => loadProjects(res.data.id));
-  }
-
-  function handleDelete(id) {
-    return api.delete(`/alphapulldown/projects/${id}`).then(() => loadProjects());
-  }
-
-  if (access === null || projects === null) return <div className={styles.loading}>Loading...</div>;
+  if (access === null) return <div className={styles.loading}>Loading...</div>;
 
   const visibleTabs = TABS.filter(
     tab => canManageUsers || (access[tab.key] || []).some(role => userRoles.includes(role))
@@ -172,7 +148,10 @@ function AlphaPulldownPages({ coreApi, userData }) {
     visibleTabs.push({ key: 'page-access', label: 'Page Access', component: PageAccessTab });
   }
 
-  const currentProject = projects.find(p => p.id === projectId) || null;
+  // The picked project, as the server described it for the caller (null until
+  // that has arrived, and when it could not be read).
+  const loaded = !!projectId && targetState.projectId === projectId;
+  const currentProject = loaded ? targetState.project : null;
   const targets = targetState.projectId === projectId ? targetState.list : [];
   const currentTarget = typeof targetId === 'number' ? targets.find(t => t.id === targetId) || null : null;
   const isLocked = tab => !!tab.isOpen && !tab.isOpen({ project: currentProject, target: currentTarget });
@@ -186,14 +165,18 @@ function AlphaPulldownPages({ coreApi, userData }) {
 
   return (
     <div>
-      <ProjectBar
-        projects={projects}
-        currentId={projectId}
-        onSelect={setProjectId}
-        onCreate={handleCreate}
-        onDelete={handleDelete}
-      />
-      {loadError && <p className={styles.error}>{loadError}</p>}
+      {ProjectPicker ? (
+        <ProjectPicker
+          mode="single"
+          rememberAs="alphapulldown.shell.project"
+          value={projectId}
+          onChange={chooseProject}
+          requireWrite
+        />
+      ) : <p className={styles.error}>This MFF-core is too old to pick a project (0.1.218 or later is needed).</p>}
+      {loaded && targetState.error && <p className={styles.error}>{targetState.error}</p>}
+      {loaded && targetState.readOnlyReason && <p className={styles.error}>{targetState.readOnlyReason}</p>}
+      {notice && <p className={styles.error}>{notice}</p>}
 
       <div className={styles.tabBar}>
         {visibleTabs.map(tab => {
@@ -215,7 +198,7 @@ function AlphaPulldownPages({ coreApi, userData }) {
       </div>
 
       <div className={styles.content}>
-        {currentTab.usesTarget && currentProject && targetState.projectId === projectId && (
+        {currentTab.usesTarget && currentProject && (
           <TargetBar
             targets={targets}
             targetId={targetId}
@@ -224,9 +207,9 @@ function AlphaPulldownPages({ coreApi, userData }) {
             onDelete={handleDeleteTarget}
           />
         )}
-        {needsProject && !currentProject ? (
-          <div className={styles.empty}>Create a project above to begin.</div>
-        ) : currentTab.usesTarget && currentProject && targetState.projectId !== projectId ? (
+        {needsProject && !projectId ? (
+          <div className={styles.empty}>Pick a project above to begin.</div>
+        ) : currentTab.usesTarget && projectId && !loaded ? (
           <div className={styles.loading}>Loading...</div>
         ) : (
           <ActiveComponent
