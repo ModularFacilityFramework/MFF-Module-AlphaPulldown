@@ -9,6 +9,7 @@ const store = require('../services/libraryStore');
 const paths = require('../services/libraryPaths');
 const library = require('../services/libraryService');
 const { httpError, makeHelpers } = require('../services/routeHelpers');
+const { requireSomeProject } = require('../services/scienceProjects');
 
 function parseMetadata(text) {
   try {
@@ -119,6 +120,7 @@ module.exports = function buildRouter(coreApi) {
 
   // POST /api/alphapulldown/library/proteomes - { upid, reviewedOnly }
   router.post('/library/proteomes', auth, withConn('Failed to start the download', async (req, res, conn) => {
+    await requireSomeProject(coreApi, req.user);
     const config = await requireLibrary(conn);
     const body = req.body || {};
     if (!uniprot.UPID.test(body.upid || '')) throw httpError(400, 'Not a proteome id (expected UP followed by 9 digits)');

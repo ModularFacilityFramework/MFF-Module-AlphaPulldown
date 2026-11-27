@@ -6,7 +6,10 @@ const { computeStats, describeComplexes, describeProteins } = require('../servic
 const { estimateRun } = require('../services/speedEstimator');
 const { loadSamples } = require('../services/speedRecorder');
 const { msaProfile } = require('../services/speedProfiles');
-const { openOwnLink } = require('../services/scienceProjects');
+const science = require('../services/scienceProjects');
+const { collectItems } = require('../services/scienceMove');
+const { ITEM_TYPES } = require('../services/projectItems');
+const { nameLookup } = require('../services/people');
 const { loadSettings } = require('../services/settingsStore');
 
 module.exports = function buildRouter(coreApi) {
@@ -52,12 +55,41 @@ module.exports = function buildRouter(coreApi) {
   router.get('/projects/:id/stats', coreApi.authenticateToken, async (req, res) => {
     const conn = await coreApi.pool.getConnection();
     try {
-      const project = await openOwnLink(coreApi, conn, req);
+      const project = await science.openOwnLink(coreApi, conn, req);
       res.json(await statsFor(conn, project, req.user.id));
     } catch (err) {
       res.status(err.status || 500).json({ error: err.status ? err.message : 'Failed to compute project stats', message: err.message });
     } finally {
       conn.release();
+    }
+  });
+
+  // GET /api/alphapulldown/projects/:id/runs - the feature and co-folding
+  // runs of a Science project, whoever started them, as last seen (nothing is
+  // refreshed or started here). Under the Project template: the caller's runs
+  // that have no project (staff see everyone's).
+  router.get('/projects/:id/runs', coreApi.authenticateToken, async (req, res) => {
+    let conn;
+    try {
+      const access = await science.requireAccess(coreApi, req.user, req.params.id);
+      conn = await coreApi.pool.getConnection();
+      let found = [];
+      if (access.isTemplate) {
+        const old = science.oldWork(req.user);
+        found = await collectItems(conn, old.where, old.params);
+      } else {
+        const links = await science.linksFor(conn, access.id);
+        if (links.length > 0) found = await collectItems(conn, `project_id IN (${links.map(() => '?').join(', ')})`, links.map(l => l.id));
+      }
+      const name = await nameLookup(coreApi);
+      res.json({
+        runs: found.filter(item => item.type !== ITEM_TYPES.target)
+          .map(item => ({ kind: item.type, id: item.id, title: item.title, state: item.status, ownerName: name(item.ownerId), createdAt: item.createdAt }))
+      });
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.status ? err.message : 'Failed to list the runs', message: err.message });
+    } finally {
+      if (conn) conn.release();
     }
   });
 

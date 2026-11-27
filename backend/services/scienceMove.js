@@ -179,4 +179,4 @@ function start(coreApi, { log = console, schedule = setTimeout } = {}) {
   later(FIRST_DELAY_MS);
 }
 
-module.exports = { moveOnce, start };
+module.exports = { collectItems, moveOnce, start };

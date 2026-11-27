@@ -23,16 +23,12 @@ const { projectDir, isInside, MODULE_DIRNAME } = require('../services/projectPat
 const science = require('../services/scienceProjects');
 const items = require('../services/projectItems');
 const { httpError } = require('../services/httpError');
+const { nameLookup } = require('../services/people');
 
-const STAFF_ROLES = ['developer', 'administrator'];
 const TARGETS_DIRNAME = 'targets';
 const MODEL_STORE_SOURCES = ['pdb', 'alphafold_db'];
 const UPLOAD_SOURCES = ['upload', 'abcfold'];
 const GENOME_VIA = ['search', 'suggestion', 'upid'];
-
-function isStaff(req) {
-  return ((req.user && req.user.roles) || []).some(role => STAFF_ROLES.includes(role));
-}
 
 function safeFilename(raw) {
   const base = path.basename(String(raw || '')).replace(/[^\w.-]/g, '_').slice(0, 200);
@@ -102,12 +98,12 @@ module.exports = function buildRouter(coreApi) {
   // before the move to Science can only be read, by its owner or staff.
   async function accessTarget(conn, req, { write = false } = {}) {
     const row = await service.findById(conn, req.params.tid);
-    const link = row ? await science.linkById(conn, row.project_id) : null;
-    if (!link) throw httpError(404, 'Target not found');
+    if (!row) throw httpError(404, 'Target not found');
+    const link = (await science.linkById(conn, row.project_id)) || { id: row.project_id, owner_id: row.owner_id, name: 'an old project', science_project_id: null };
     if (!link.science_project_id) {
-      if (Number(link.owner_id) !== Number(req.user.id) && !isStaff(req)) throw httpError(404, 'Target not found');
+      if (Number(link.owner_id) !== Number(req.user.id) && !science.isStaff(req.user)) throw httpError(404, 'Target not found');
       if (write) throw httpError(403, science.NOT_MOVED);
-      return { row, link, access: { id: null, number: '', title: link.name, archived: false, canRead: true, canWrite: false, reason: science.NOT_MOVED } };
+      return { row, link, access: { id: null, number: '', title: link.name, archived: false, isTemplate: false, canRead: true, canWrite: false, reason: science.NOT_MOVED } };
     }
     try {
       return { row, link, access: await science.requireAccess(coreApi, req.user, link.science_project_id, { write }) };
@@ -117,25 +113,12 @@ module.exports = function buildRouter(coreApi) {
     }
   }
 
-  // People are shown as "First Last (username)" (core's UI rule); a user
-  // with no name on record is shown by username alone.
-  function personLabel(user) {
-    if (!user) return '';
-    const name = [user.first_name, user.last_name].filter(Boolean).join(' ').trim();
-    return name ? `${name} (${user.username})` : user.username;
-  }
-
   async function ownerName(ownerId) {
-    try {
-      const users = await coreApi.listUsers();
-      return personLabel(users.find(u => Number(u.id) === Number(ownerId)));
-    } catch (err) {
-      return '';
-    }
+    return (await nameLookup(coreApi))(ownerId);
   }
 
   function describeProject(access) {
-    return { id: access.id, number: access.number, name: access.title, archived: access.archived };
+    return { id: access.id, number: access.number, name: access.title, archived: access.archived, isTemplate: access.isTemplate };
   }
 
   async function view(conn, req, access, row) {
@@ -236,12 +219,19 @@ module.exports = function buildRouter(coreApi) {
   router.get('/projects/:id/targets', auth, handle('Failed to list the targets', async (req, res) => {
     const access = await accessProject(req);
     res.json(await db(async conn => {
-      const links = await science.linksFor(conn, access.id);
+      let targets = [];
+      if (access.isTemplate) {
+        const old = science.oldWork(req.user);
+        targets = await service.listTargets(conn, old.where, old.params);
+      } else {
+        const links = await science.linksFor(conn, access.id);
+        if (links.length > 0) targets = await service.listTargets(conn, `t.project_id IN (${links.map(() => '?').join(', ')})`, links.map(l => l.id));
+      }
       return {
         project: describeProject(access),
         readOnly: !access.canWrite,
         readOnlyReason: access.reason,
-        targets: await service.listForLinks(conn, links.map(l => l.id)),
+        targets,
         chimeraWarning: rules.CHIMERA_WARNING
       };
     }));
@@ -517,54 +507,6 @@ module.exports = function buildRouter(coreApi) {
     });
     await removeOwnModelFiles(req, access, row);
     res.json(await withItem(req, access, payload));
-  }));
-
-  // ---- staff ----------------------------------------------------------------------
-
-  // GET /api/alphapulldown/targets - developers and administrators: every
-  // user's target, to open read-only.
-  router.get('/targets', auth, coreApi.checkRole(STAFF_ROLES), handle('Failed to list targets', async (req, res) => {
-    const rows = await db(conn => conn.query(
-      `SELECT t.id, t.owner_id, t.name, t.status, t.genome_organism, t.genome_upid, t.updated_at, t.confirmed_at,
-              p.science_project_id, p.name AS link_name,
-              (SELECT COUNT(*) FROM alphapulldown_target_chains c WHERE c.target_id = t.id) AS chain_count,
-              (SELECT COUNT(*) FROM alphapulldown_target_chains c WHERE c.target_id = t.id AND (c.validation_status IS NULL OR c.validation_status <> 'matched')) AS unconfirmed_count
-       FROM alphapulldown_targets t JOIN alphapulldown_projects p ON p.id = t.project_id
-       ORDER BY t.updated_at DESC LIMIT 500`
-    ));
-    let users = [];
-    try {
-      users = await coreApi.listUsers();
-    } catch (err) {
-      users = [];
-    }
-    // listUsers() is already sorted by first name, then last name: list the
-    // owners in that order, each one's targets newest first.
-    const rank = new Map(users.map((u, i) => [Number(u.id), i]));
-    const position = r => (rank.has(Number(r.owner_id)) ? rank.get(Number(r.owner_id)) : users.length);
-    rows.sort((a, b) => position(a) - position(b));
-    const projects = new Map();
-    for (const id of new Set(rows.map(r => Number(r.science_project_id || 0)).filter(Boolean))) {
-      projects.set(id, coreApi.projects ? await coreApi.projects.get(req.user, id) : null);
-    }
-    const projectOf = r => projects.get(Number(r.science_project_id || 0)) || null;
-    res.json({
-      targets: rows.map(r => ({
-        targetId: Number(r.id),
-        projectId: r.science_project_id ? Number(r.science_project_id) : null,
-        projectNumber: projectOf(r) ? projectOf(r).number : '',
-        projectName: projectOf(r) ? projectOf(r).title : (r.science_project_id ? r.link_name : `${r.link_name} (not moved to Science yet)`),
-        name: r.name,
-        ownerId: Number(r.owner_id),
-        ownerName: personLabel(users.find(u => Number(u.id) === Number(r.owner_id))),
-        status: r.status,
-        genome: r.genome_upid ? `${r.genome_organism || ''} (${r.genome_upid})`.trim() : '',
-        chains: Number(r.chain_count),
-        unconfirmedChains: Number(r.unconfirmed_count),
-        updatedAt: r.updated_at,
-        confirmedAt: r.confirmed_at
-      }))
-    });
   }));
 
   return router;

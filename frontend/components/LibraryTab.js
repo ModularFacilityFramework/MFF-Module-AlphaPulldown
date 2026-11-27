@@ -97,7 +97,10 @@ function ProteomeDetails({ p }) {
   );
 }
 
-function LibraryTab({ coreApi }) {
+function LibraryTab({ coreApi, selection }) {
+  // Adding a proteome needs a project of one's own (any one): core greys the
+  // buttons, with the reason, for someone who has none. The server checks too.
+  const ProjectTask = (selection && coreApi.ui && coreApi.ui.ProjectTask) || null;
   const { api, useAuth, useRoles } = coreApi;
   const { canManageUsers } = useRoles(useAuth().userData);
   const [library, setLibrary] = useState(null);
@@ -121,6 +124,8 @@ function LibraryTab({ coreApi }) {
     const timer = setInterval(load, POLL_MS);
     return () => clearInterval(timer);
   }, [downloading, load]);
+
+  const forAnyProject = node => (ProjectTask ? <ProjectTask selection={selection} need="any">{node}</ProjectTask> : node);
 
   function find(e) {
     e.preventDefault();
@@ -201,7 +206,7 @@ function LibraryTab({ coreApi }) {
         <button type="submit" className={styles.btnBlue} disabled={finding || !query.trim()}>{finding ? 'Searching...' : 'Search'}</button>
       </form>
       {found && found.length === 0 && <p className={styles.empty}>No proteomes found.</p>}
-      {found && found.length > 0 && (
+      {found && found.length > 0 && forAnyProject(
         <div className={styles.tableWrapper}>
           <table className={styles.table}>
             <thead><tr><SortHeader table={searchTable} column="upid">Proteome</SortHeader><SortHeader table={searchTable} column="organism">Organism</SortHeader><SortHeader table={searchTable} column="taxon">Taxon</SortHeader><SortHeader table={searchTable} column="proteins" className={styles.numeric}>Proteins</SortHeader><th /></tr></thead>

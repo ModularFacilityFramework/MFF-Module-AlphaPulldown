@@ -69,7 +69,7 @@ function draftFrom(payload) {
 }
 
 // targetId null = a new target that has not been saved yet.
-function TargetEditor({ coreApi, projectId, targetId, onChanged, onSaved, onBack }) {
+function TargetEditor({ coreApi, projectId, targetId, onChanged, onSaved }) {
   const { api } = coreApi;
   const [payload, setPayload] = useState(null);
   const [draft, setDraft] = useState(null);
@@ -136,14 +136,7 @@ function TargetEditor({ coreApi, projectId, targetId, onChanged, onSaved, onBack
     memory.remember(saved, { name: draft.name, chains: draft.chains, genome: draft.genome }, snapshotOf(draft) === saved);
   }, [payload, draft, saved, memory]);
 
-  if (error && !payload) {
-    return (
-      <div>
-        <p className={shared.errorText}>{error}</p>
-        {onBack && <button type="button" className={shared.btnGray} onClick={onBack}>Back</button>}
-      </div>
-    );
-  }
+  if (error && !payload) return <p className={shared.errorText}>{error}</p>;
   if (!payload || !draft) return <div className={shared.empty}>Loading...</div>;
 
   const readOnly = payload.readOnly;
@@ -200,17 +193,10 @@ function TargetEditor({ coreApi, projectId, targetId, onChanged, onSaved, onBack
       {readOnly && (
         <div className={shared.warningBanner}>
           <span>{`Read-only${payload.ownerName ? ` (target made by ${payload.ownerName})` : ''}. ${payload.readOnlyReason || 'You cannot change this project.'}`}</span>
-          {onBack && <button type="button" className={shared.btnGray} onClick={onBack}>Back</button>}
-        </div>
-      )}
-      {!readOnly && onBack && (
-        <div className={shared.warningBanner}>
-          <span>{`${payload.project.number} ${payload.project.name}${payload.ownerName ? ` - target made by ${payload.ownerName}` : ''}. You can change it: you have write access to this project.`}</span>
-          <button type="button" className={shared.btnGray} onClick={onBack}>Back</button>
         </div>
       )}
       {payload.itemWarning && <p className={shared.errorText}>{payload.itemWarning}</p>}
-      {!readOnly && !onBack && payload.ownerName && <p className={shared.hint}>{`Made by ${payload.ownerName}. Everyone with write access to this project can change it.`}</p>}
+      {!readOnly && payload.ownerName && <p className={shared.hint}>{`Made by ${payload.ownerName}. Everyone with write access to this project can change it.`}</p>}
 
       <div className={shared.panel}>
         <h3 className={shared.panelTitle}>

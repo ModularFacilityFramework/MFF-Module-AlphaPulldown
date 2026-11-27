@@ -13,8 +13,17 @@ const { httpError } = require('./httpError');
 
 const NOT_MOVED = 'This work belongs to an old AlphaPulldown project that has not been moved into a Science project yet.';
 
+const TEMPLATE_ONLY_OLD = 'Project template only holds older work - choose another project.';
+const STAFF_ROLES = ['developer', 'administrator'];
+
+function isStaff(user) {
+  return ((user && user.roles) || []).some(role => STAFF_ROLES.includes(role));
+}
+
 // What core says about `user` in Science project `id`, as
-// { id, number, title, archived, canRead, canWrite, reason }.
+// { id, number, title, archived, isTemplate, canRead, canWrite, reason }.
+// Nothing is ever created or changed in the Project template or in an
+// archived project, whatever the user's access to it.
 async function projectAccess(coreApi, user, id) {
   if (!coreApi.projects) throw httpError(503, 'Projects are not available: this core is too old (0.1.218 or later is needed).');
   const wanted = Number(id);
@@ -28,16 +37,19 @@ async function projectAccess(coreApi, user, id) {
   if (!answer.can_read) throw httpError(404, 'Project not found');
   const project = answer.project || {};
   const archived = !!project.archived;
+  const isTemplate = !!project.is_template;
   let reason = '';
-  if (archived) reason = 'This project is archived, so nothing in it can be changed or run.';
+  if (isTemplate) reason = TEMPLATE_ONLY_OLD;
+  else if (archived) reason = 'This project is archived, so nothing in it can be changed or run.';
   else if (!answer.can_write) reason = 'You have read-only access to this project. Its owner can give you write access in Science.';
   return {
     id: wanted,
     number: project.number || '',
     title: project.title || `Project ${wanted}`,
     archived,
+    isTemplate,
     canRead: true,
-    canWrite: !!answer.can_write && !archived,
+    canWrite: !!answer.can_write && !archived && !isTemplate,
     reason
   };
 }
@@ -48,6 +60,25 @@ async function requireAccess(coreApi, user, id, { write = false } = {}) {
   const access = await projectAccess(coreApi, user, id);
   if (write && !access.canWrite) throw httpError(403, access.reason);
   return access;
+}
+
+// For something new that belongs to no particular project (adding a proteome
+// to the shared library): the user needs a project of their own to work in.
+// Staff look after the library and are not held to it.
+async function requireSomeProject(coreApi, user) {
+  if (isStaff(user)) return;
+  if (!coreApi.projects || typeof coreApi.projects.hasWritableProject !== 'function') {
+    throw httpError(503, 'Projects are not available: this core is too old (0.1.227 or later is needed).');
+  }
+  if (!(await coreApi.projects.hasWritableProject(user))) throw httpError(403, 'You need a project first: ask for one on the project tabs, or ask a project owner for write access.');
+}
+
+// The rows (a condition on project_id and owner_id) of work that has no
+// Science project: its old project has not been moved, or is gone. It is shown
+// under the Project template, to its owner and to staff only.
+function oldWork(user) {
+  const where = '(project_id NOT IN (SELECT id FROM alphapulldown_projects WHERE science_project_id IS NOT NULL))';
+  return isStaff(user) ? { where, params: [] } : { where: `${where} AND owner_id = ?`, params: [user.id] };
 }
 
 async function linksFor(conn, scienceId) {
@@ -94,4 +125,4 @@ async function openOwnLink(coreApi, conn, req, { write = req.method !== 'GET' } 
   return { ...row, name: access.title, science: access };
 }
 
-module.exports = { NOT_MOVED, projectAccess, requireAccess, linksFor, linkById, findLink, ensureLink, openOwnLink };
+module.exports = { NOT_MOVED, isStaff, projectAccess, requireAccess, requireSomeProject, oldWork, linksFor, linkById, findLink, ensureLink, openOwnLink };

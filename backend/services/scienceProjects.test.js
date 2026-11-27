@@ -20,7 +20,29 @@ const status = code => err => err.status === code;
 
 test('write access allows changing, and the project is described', async () => {
   const access = await science.requireAccess(coreWith(answer()), USER, '4', { write: true });
-  assert.deepStrictEqual(access, { id: 4, number: 'P-0004', title: 'Kinases', archived: false, canRead: true, canWrite: true, reason: '' });
+  assert.deepStrictEqual(access, { id: 4, number: 'P-0004', title: 'Kinases', archived: false, isTemplate: false, canRead: true, canWrite: true, reason: '' });
+});
+
+test('nothing is changed in the Project template, even by an administrator', async () => {
+  const core = coreWith(answer({ access: 'admin', project: { id: 1, number: 'P-0001', title: 'Project template', archived: false, is_template: true } }));
+  const access = await science.requireAccess(core, USER, 1);
+  assert.deepStrictEqual([access.isTemplate, access.canRead, access.canWrite], [true, true, false]);
+  await assert.rejects(science.requireAccess(core, USER, 1, { write: true }), err => err.status === 403 && /older work/.test(err.message));
+});
+
+test('something new outside a project needs a project of one\'s own; staff do not', async () => {
+  const core = has => ({ projects: { hasWritableProject: async () => has } });
+  await science.requireSomeProject(core(true), USER);
+  await assert.rejects(science.requireSomeProject(core(false), USER), err => err.status === 403 && /need a project first/.test(err.message));
+  await assert.rejects(science.requireSomeProject({ projects: {} }, USER), status(503));
+  await science.requireSomeProject({}, { id: 1, roles: ['administrator'] });
+});
+
+test('work without a Science project is limited to its owner, except for staff', () => {
+  const mine = science.oldWork(USER);
+  assert.match(mine.where, /AND owner_id = \?$/);
+  assert.deepStrictEqual(mine.params, [7]);
+  assert.deepStrictEqual(science.oldWork({ id: 1, roles: ['developer'] }).params, []);
 });
 
 test('read-only access reads but cannot change, and says why', async () => {

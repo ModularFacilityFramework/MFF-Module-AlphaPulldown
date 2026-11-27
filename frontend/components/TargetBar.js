@@ -6,7 +6,7 @@ import styles from '../styles/TargetTab.module.css';
 
 export const NEW_TARGET = 'new';
 
-function TargetBar({ targets, targetId, readOnly, onSelect, onDelete }) {
+function TargetBar({ targets, targetId, readOnly, canCreate, onSelect, onDelete }) {
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -31,7 +31,7 @@ function TargetBar({ targets, targetId, readOnly, onSelect, onDelete }) {
         onChange={e => { setConfirming(false); onSelect(e.target.value === NEW_TARGET ? NEW_TARGET : Number(e.target.value)); }}
       >
         {targets.map(t => <option key={t.id} value={t.id}>{`${t.name || `Target ${t.id}`} (${t.status})`}</option>)}
-        {!readOnly && <option value={NEW_TARGET}>+ New target</option>}
+        {!readOnly && canCreate && <option value={NEW_TARGET}>+ New target</option>}
       </select>
       {current && (
         <span className={`${shared.chip} ${current.status === 'confirmed' ? shared.chipGreen : shared.chipAmber}`}>
