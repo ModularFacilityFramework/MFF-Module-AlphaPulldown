@@ -83,7 +83,11 @@ function TargetEditor({ coreApi, projectId, targetId, onChanged, onSaved }) {
   const stateKey = `sp-target:${projectId}:${targetId || 'new'}`;
   const memory = usePageDraft(`${stateKey}:draft`);
 
-  useEffect(() => () => { mounted.current = false; }, []);
+  useEffect(() => {
+    // Set again here: development builds run effects, clean them up, then run them again.
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   const apply = useCallback((data, created) => {
     const next = draftFrom(data);
