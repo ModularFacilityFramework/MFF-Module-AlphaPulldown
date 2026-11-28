@@ -3,8 +3,9 @@
 // db/schema.sql). It runs in the background after the module starts and is
 // safe to repeat:
 //   1. each old project (a link row with no science_project_id) becomes a
-//      Science project created as its owner, and its targets and runs are
-//      listed on that project's page;
+//      Science project owned by its owner (through Science's import route,
+//      which also takes an owner who may not create projects), and its targets
+//      and runs are listed on that project's page;
 //   2. targets and runs whose old project no longer exists have no project:
 //      they are listed in Science's "Project template", in their owner's name.
 // What cannot be moved yet (Science not ready, an owner who cannot sign in)
@@ -46,16 +47,29 @@ async function createdEarlier(coreApi, link) {
   return null;
 }
 
+// Science's import route is for old projects only. It needs no "has a project"
+// right, and answers a repeat for the same old_id with the same project. The
+// old_id is the link row's id: rows are never deleted, so it is never reused.
+// A Science older than the route answers 404; the ordinary creating route is
+// used then (it refuses an owner who may not create projects).
+async function importProject(coreApi, link, project) {
+  const imported = await coreApi.callModuleAsUser(link.owner_id, 'science', 'POST', '/external/project-imports', {
+    body: { old_id: String(link.id), ...project }
+  });
+  if (imported.ok || imported.status !== 404) return imported;
+  return coreApi.callModuleAsUser(link.owner_id, 'science', 'POST', '/external/projects', { body: project });
+}
+
 async function createProject(coreApi, link) {
+  // A project made without the import route is known to Science only by the
+  // mark, so this comes first.
   const earlier = await createdEarlier(coreApi, link);
   if (earlier) return Number(earlier.id);
-  const made = await coreApi.callModuleAsUser(link.owner_id, 'science', 'POST', '/external/projects', {
-    body: {
-      title: String(link.name || `AlphaPulldown project ${link.project_number}`).slice(0, 200),
-      description: `Moved from AlphaPulldown (its project P${link.project_number}). ${marker(link)}`
-    }
+  const made = await importProject(coreApi, link, {
+    title: String(link.name || `AlphaPulldown project ${link.project_number}`).slice(0, 200),
+    description: `Moved from AlphaPulldown (its project P${link.project_number}). ${marker(link)}`
   });
-  const id = made.ok && made.data ? Number(made.data.id || (made.data.project && made.data.project.id)) : 0;
+  const id = made.ok && made.data ? Number((made.data.project && made.data.project.id) || made.data.id) : 0;
   if (!id) throw new Error(`Science did not create the project: ${failure(made)}`);
   return id;
 }

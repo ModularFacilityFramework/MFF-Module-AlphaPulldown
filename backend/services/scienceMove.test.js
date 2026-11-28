@@ -25,9 +25,16 @@ function fakeDb(data) {
   return { query, release: () => {} };
 }
 
-// Science as the move sees it. `disabled` users are refused by core.
-function fakeCore(data, { disabled = [], failItems = false } = {}) {
-  const science = { projects: [], items: [], template: [] };
+// Science as the move sees it. `disabled` users are refused by core;
+// `mayNotCreate` users are refused by the ordinary creating route only;
+// `noImportRoute` is a Science older than the import route.
+function fakeCore(data, { disabled = [], failItems = false, mayNotCreate = [], noImportRoute = false } = {}) {
+  const science = { projects: [], items: [], template: [], imports: new Map(), calls: [] };
+  const create = (userId, body) => {
+    const project = { id: 100 + science.projects.length, owner: userId, ...body };
+    science.projects.push(project);
+    return project;
+  };
   const core = {
     science,
     failItems,
@@ -36,10 +43,20 @@ function fakeCore(data, { disabled = [], failItems = false } = {}) {
       assert.strictEqual(moduleId, 'science');
       if (disabled.includes(userId)) return { ok: false, status: 0, data: null, error: 'refused', refused: true, reason: 'user_unavailable' };
       if (method === 'GET' && path === '/external/projects') return { ok: true, status: 200, data: science.projects.filter(p => p.owner === userId) };
+      if (method === 'POST') science.calls.push(path);
+      if (method === 'POST' && path === '/external/project-imports') {
+        if (noImportRoute) return { ok: false, status: 404, data: null, error: null };
+        const { old_id: oldId, title, description } = opts.body;
+        assert.strictEqual(typeof oldId, 'string');
+        const earlier = science.imports.get(oldId);
+        if (earlier && earlier.user !== userId) return { ok: false, status: 409, data: { error: 'imported for another user' }, error: null };
+        const id = earlier ? earlier.id : create(userId, { title, description }).id;
+        science.imports.set(oldId, { id, user: userId });
+        return { ok: true, status: earlier ? 200 : 201, data: { created: !earlier, project: { id, number: `P-${id}` }, access: 'owner', can_read: true, can_write: true, can_manage: true } };
+      }
       if (method === 'POST' && path === '/external/projects') {
-        const project = { id: 100 + science.projects.length, owner: userId, ...opts.body };
-        science.projects.push(project);
-        return { ok: true, status: 201, data: project };
+        if (mayNotCreate.includes(userId)) return { ok: false, status: 403, data: { error: 'You cannot create a project' }, error: null };
+        return { ok: true, status: 201, data: create(userId, opts.body) };
       }
       if (path === '/external/template/items') {
         science.template.push(...opts.body.items);
@@ -89,6 +106,48 @@ test('old projects become their owner\'s Science projects with their targets and
   // the run whose project is gone goes to Project template, in its owner's name
   assert.strictEqual(report.template, 1);
   assert.deepStrictEqual(core.science.template.map(i => [i.item_type, i.item_id, i.created_by]), [['msa_run', '4', 7]]);
+});
+
+test('an owner who may not create projects is moved through the import route', async () => {
+  const data = sample();
+  const core = fakeCore(data, { mayNotCreate: [7, 9] });
+  const report = await move.moveOnce(core);
+  assert.deepStrictEqual(report.pending, []);
+  assert.strictEqual(report.moved, 2);
+  assert.deepStrictEqual([...core.science.imports.keys()], ['1', '2']);
+  assert.ok(!core.science.calls.includes('/external/projects'));
+  assert.match(core.science.projects[0].description, /\[AlphaPulldown project 1\]$/);
+});
+
+test('on a Science without the import route the ordinary route is used', async () => {
+  const data = sample();
+  const core = fakeCore(data, { noImportRoute: true, mayNotCreate: [9] });
+  const report = await move.moveOnce(core);
+  assert.strictEqual(report.moved, 1);
+  assert.deepStrictEqual(core.science.projects.map(p => p.owner), [7]);
+  assert.match(report.pending.join(), /project 2 \(user 9\).*You cannot create a project/);
+});
+
+test('an import Science already has is answered with the same project', async () => {
+  const data = sample();
+  data.links.pop();
+  const core = fakeCore(data);
+  // imported before an interruption, and no longer among the owner's projects
+  core.science.imports.set('1', { id: 77, user: 7 });
+  await move.moveOnce(core);
+  assert.strictEqual(core.science.projects.length, 0);
+  assert.strictEqual(data.links[0].science_project_id, 77);
+});
+
+test('a refused import is not retried through the ordinary route', async () => {
+  const data = sample();
+  data.links.pop();
+  const core = fakeCore(data);
+  core.science.imports.set('1', { id: 77, user: 8 });
+  const report = await move.moveOnce(core);
+  assert.ok(!core.science.calls.includes('/external/projects'));
+  assert.strictEqual(data.links[0].science_project_id, null);
+  assert.match(report.pending.join(), /imported for another user/);
 });
 
 test('a second pass makes nothing twice', async () => {
